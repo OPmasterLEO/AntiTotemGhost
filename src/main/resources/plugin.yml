@@ -1,0 +1,19 @@
+name: MasterAntiGhost
+main: net.opmasterleo.masterantighost.MasterAntiGhost
+author: OPmasterLEO
+version: "${version}"
+api-version: "1.20"
+description: "${description}"
+folia-supported: true
+
+commands:
+  masterantighost:
+    description: MasterAntiGhost admin command
+    usage: /masterantighost [reload|debug|stats]
+    permission: masterantighost.admin
+    aliases: [mag, antighost]
+
+permissions:
+  masterantighost.admin:
+    description: Admin permission for MasterAntiGhost
+    default: op

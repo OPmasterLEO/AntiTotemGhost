@@ -1,0 +1,30 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║           MasterAntiGhost — Configuration File                  ║
+# ║     Extreme anti-totem-ghost system for crystal PvP             ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+# Number of ticks to wait before reconciliation decision (default: 1)
+# Higher values give more time for packet processing but increase perceived latency.
+# Recommended: 1 for competitive servers, 2 for high-latency networks.
+reconciliation-ticks: 1
+
+# Number of ticks to track swap buffer history (default: 2)
+# Covers worst-case client→server timing for offhand swaps and window clicks.
+# This is the lookback window: any totem swap within this many ticks is considered valid.
+swap-buffer-ticks: 2
+
+# Enable fast-path immediate totem check on the same tick as damage (default: true)
+# When enabled, the plugin reads NMS offhand state immediately on the damage event tick.
+# If a valid totem is found, resurrection is instant with zero additional latency.
+# Disabling this forces ALL lethal hits through the reconciliation pipeline.
+enable-fast-path: true
+
+# Enable debug logging for development and testing (default: false)
+# WARNING: Extremely verbose — logs every damage intercept, swap buffer state,
+# reconciliation decision, and NMS read. Do NOT enable in production.
+debug-mode: false
+
+# Enable sandbox mode for stress testing (default: false)
+# When enabled: players respawn instantly at death location, receive fresh totems,
+# and all combat events are logged to a separate file for analysis.
+sandbox-mode: false
