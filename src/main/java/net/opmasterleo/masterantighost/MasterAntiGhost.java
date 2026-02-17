@@ -1,5 +1,10 @@
 package net.opmasterleo.masterantighost;
 
+import java.util.concurrent.atomic.LongAdder;
+
+import org.bukkit.Bukkit;
+import org.bukkit.plugin.java.JavaPlugin;
+
 import net.opmasterleo.masterantighost.buffer.SwapBuffer;
 import net.opmasterleo.masterantighost.combat.CombatManager;
 import net.opmasterleo.masterantighost.combat.ManualResurrection;
@@ -11,10 +16,6 @@ import net.opmasterleo.masterantighost.listener.SwapListener;
 import net.opmasterleo.masterantighost.nms.NmsAccessor;
 import net.opmasterleo.masterantighost.nms.NmsAccessorUniversal;
 import net.opmasterleo.masterantighost.scheduler.FoliaScheduler;
-import org.bukkit.Bukkit;
-import org.bukkit.plugin.java.JavaPlugin;
-
-import java.util.concurrent.atomic.LongAdder;
 public final class MasterAntiGhost extends JavaPlugin {
 
     private final LongAdder fastPathPops = new LongAdder();

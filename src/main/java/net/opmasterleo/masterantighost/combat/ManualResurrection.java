@@ -1,8 +1,9 @@
 package net.opmasterleo.masterantighost.combat;
 
+import org.bukkit.entity.Player;
+
 import net.opmasterleo.masterantighost.debug.DebugLogger;
 import net.opmasterleo.masterantighost.nms.NmsAccessor;
-import org.bukkit.entity.Player;
 
 public final class ManualResurrection {
 

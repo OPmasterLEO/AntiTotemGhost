@@ -1,16 +1,17 @@
 package net.opmasterleo.masterantighost.nms;
 
-import net.opmasterleo.masterantighost.debug.DebugLogger;
-import org.bukkit.Bukkit;
-import org.bukkit.entity.Player;
-import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.craftbukkit.entity.CraftPlayer;
-
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
+
+import org.bukkit.Bukkit;
+import org.bukkit.craftbukkit.entity.CraftPlayer;
+import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageEvent;
+
+import net.opmasterleo.masterantighost.debug.DebugLogger;
 
 public final class NmsAccessorUniversal implements NmsAccessor {
 

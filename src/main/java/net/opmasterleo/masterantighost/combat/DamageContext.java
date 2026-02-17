@@ -1,8 +1,8 @@
 package net.opmasterleo.masterantighost.combat;
 
-import org.bukkit.event.entity.EntityDamageEvent;
-
 import java.util.UUID;
+
+import org.bukkit.event.entity.EntityDamageEvent;
 
 public final class DamageContext {
 
