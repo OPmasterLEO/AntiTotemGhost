@@ -1,19 +1,20 @@
 package net.opmasterleo.masterantighost.listener;
 
-import net.opmasterleo.masterantighost.MasterAntiGhost;
-import net.opmasterleo.masterantighost.config.PluginConfig;
-import net.opmasterleo.masterantighost.debug.DebugLogger;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.stream.Collectors;
+
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.concurrent.atomic.LongAdder;
-import java.util.stream.Collectors;
+import net.opmasterleo.masterantighost.MasterAntiGhost;
+import net.opmasterleo.masterantighost.config.PluginConfig;
+import net.opmasterleo.masterantighost.debug.DebugLogger;
 
 public final class CommandListener implements CommandExecutor, TabCompleter {
 

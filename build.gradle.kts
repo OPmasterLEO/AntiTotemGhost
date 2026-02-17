@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "net.opmasterleo"
-version = "1.0.0"
+version = "1.0.0-SNAPSHOT"
 description = "Extreme anti-totem-ghost system for high-intensity crystal PvP"
 
 java {
