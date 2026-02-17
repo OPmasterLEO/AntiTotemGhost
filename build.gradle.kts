@@ -1,6 +1,6 @@
 plugins {
     java
-    id("io.papermc.paperweight.userdev") version "1.7.7"
+    id("io.papermc.paperweight.userdev") version "2.0.0-beta.19"
 }
 
 group = "net.opmasterleo"
@@ -8,8 +8,7 @@ version = "1.0.0"
 description = "Extreme anti-totem-ghost system for high-intensity crystal PvP"
 
 java {
-    // Java 17+ required for Paper 1.20.4+
-    toolchain.languageVersion.set(JavaLanguageVersion.of(17))
+    toolchain.languageVersion.set(JavaLanguageVersion.of(21))
 }
 
 repositories {
@@ -18,26 +17,22 @@ repositories {
 }
 
 dependencies {
-    // paperweight-userdev provides Mojang-mapped NMS + CraftBukkit at compile time.
-    // At build time, reobfJar reobfuscates to Spigot mappings for production.
-    paperweight.paperDevBundle("1.20.4-R0.1-SNAPSHOT")
+    paperweight.paperDevBundle("1.21.11-R0.1-SNAPSHOT")
 
-    // --- Test Dependencies ---
-    testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.1")
-    testImplementation("org.junit.jupiter:junit-jupiter-engine:5.10.1")
-    testImplementation("org.mockito:mockito-core:5.8.0")
-    testImplementation("org.mockito:mockito-junit-jupiter:5.8.0")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.1")
+    testImplementation("org.mockito:mockito-core:5.21.0")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.21.0")
 }
 
 tasks {
-    // Ensure the reobfuscated JAR is built on `gradle build`
     assemble {
         dependsOn(reobfJar)
     }
 
     compileJava {
         options.encoding = "UTF-8"
-        options.release.set(17)
+        options.release.set(21)
     }
 
     processResources {
@@ -56,14 +51,9 @@ tasks {
         useJUnitPlatform()
     }
 
-    // Dev JAR — not reobfuscated, for local Paper/Folia dev server testing
     register<Jar>("devJar") {
         archiveClassifier.set("dev")
         from(sourceSets.main.get().output)
     }
 
-    // Production JAR — reobfuscated for deployment
-    reobfJar {
-        outputJar.set(layout.buildDirectory.file("libs/${rootProject.name}-${project.version}.jar"))
-    }
 }

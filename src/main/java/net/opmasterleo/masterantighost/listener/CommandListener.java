@@ -15,35 +15,21 @@ import java.util.List;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 
-/**
- * Command handler for /masterantighost (aliases: /mag, /antighost).
- *
- * <p><b>Subcommands:</b>
- * <ul>
- *   <li>{@code reload} — Reload plugin configuration</li>
- *   <li>{@code debug} — Toggle debug mode at runtime</li>
- *   <li>{@code stats} — Display anti-ghost statistics</li>
- * </ul>
- *
- * <p><b>Permission:</b> {@code masterantighost.admin} (default: op)</p>
- */
 public final class CommandListener implements CommandExecutor, TabCompleter {
 
     private static final String PREFIX = ChatColor.GOLD + "[MasterAntiGhost] " + ChatColor.RESET;
     private static final List<String> SUBCOMMANDS = Arrays.asList("reload", "debug", "stats");
 
     private final MasterAntiGhost plugin;
-    private final PluginConfig config;
     private final LongAdder fastPathPops;
     private final LongAdder reconciledPops;
     private final LongAdder reconciledDeaths;
     private final LongAdder interceptedHits;
 
-    public CommandListener(MasterAntiGhost plugin, PluginConfig config,
+    public CommandListener(MasterAntiGhost plugin,
                            LongAdder fastPathPops, LongAdder reconciledPops,
                            LongAdder reconciledDeaths, LongAdder interceptedHits) {
         this.plugin = plugin;
-        this.config = config;
         this.fastPathPops = fastPathPops;
         this.reconciledPops = reconciledPops;
         this.reconciledDeaths = reconciledDeaths;
@@ -74,6 +60,7 @@ public final class CommandListener implements CommandExecutor, TabCompleter {
                         (newState ? ChatColor.GREEN + "ENABLED" : ChatColor.RED + "DISABLED"));
             }
             case "stats" -> {
+                PluginConfig config = plugin.getPluginConfig();
                 sender.sendMessage(PREFIX + ChatColor.AQUA + "=== Anti-Ghost Statistics ===");
                 sender.sendMessage(PREFIX + "Fast-path totem pops: " + ChatColor.WHITE + fastPathPops.sum());
                 sender.sendMessage(PREFIX + "Reconciled totem pops: " + ChatColor.WHITE + reconciledPops.sum());
@@ -104,9 +91,7 @@ public final class CommandListener implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 1) {
             String partial = args[0].toLowerCase();
-            return SUBCOMMANDS.stream()
-                    .filter(s -> s.startsWith(partial))
-                    .collect(Collectors.toList());
+            return SUBCOMMANDS.stream().filter(s -> s.startsWith(partial)).collect(Collectors.toList());
         }
         return new ArrayList<>();
     }
