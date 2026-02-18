@@ -29,6 +29,14 @@ public final class SwapBuffer {
     public void recordSwap(UUID playerId, long tick, SwapType type, boolean hadTotem) {
         ConcurrentLinkedDeque<SwapEntry> entries = playerSwaps.computeIfAbsent(playerId, k -> new ConcurrentLinkedDeque<>());
         entries.addLast(new SwapEntry(tick, type, hadTotem));
+        int trimWindow = windowTicks.get() + 20;
+        while (true) {
+            SwapEntry head = entries.peekFirst();
+            if (head == null || tick - head.tick() <= trimWindow) {
+                break;
+            }
+            entries.pollFirst();
+        }
         DebugLogger.debug("SwapBuffer", "swap %s player=%s tick=%d hadTotem=%s", type, playerId, tick, hadTotem);
     }
 
@@ -56,16 +64,11 @@ public final class SwapBuffer {
         if (entries == null || entries.isEmpty()) {
             return false;
         }
-
-        int window = windowTicks.get();
-        for (var it = entries.descendingIterator(); it.hasNext(); ) {
-            SwapEntry entry = it.next();
-            if (currentTick - entry.tick() > window) {
-                break;
-            }
-            return true;
+        SwapEntry latest = entries.peekLast();
+        if (latest == null) {
+            return false;
         }
-        return false;
+        return currentTick - latest.tick() <= windowTicks.get();
     }
 
     public void cleanupExpired(long currentTick) {

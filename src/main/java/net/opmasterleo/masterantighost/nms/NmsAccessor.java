@@ -7,6 +7,8 @@ public interface NmsAccessor {
 
     boolean hasTotemInOffhand(Player player);
 
+    boolean consumeOffhandTotemIfPresent(Player player);
+
     void consumeOneTotemFromOffhand(Player player);
 
     void setHealthNms(Player player, float health);

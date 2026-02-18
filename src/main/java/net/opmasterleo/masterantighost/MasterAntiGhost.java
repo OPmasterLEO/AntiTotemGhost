@@ -12,9 +12,9 @@ import net.opmasterleo.masterantighost.config.PluginConfig;
 import net.opmasterleo.masterantighost.debug.DebugLogger;
 import net.opmasterleo.masterantighost.listener.CommandListener;
 import net.opmasterleo.masterantighost.listener.DamageListener;
-import net.opmasterleo.masterantighost.listener.SwapListener;
 import net.opmasterleo.masterantighost.nms.NmsAccessor;
 import net.opmasterleo.masterantighost.nms.NmsAccessorUniversal;
+import net.opmasterleo.masterantighost.nms.PacketSwapInjector;
 import net.opmasterleo.masterantighost.scheduler.FoliaScheduler;
 public final class MasterAntiGhost extends JavaPlugin {
 
@@ -29,6 +29,7 @@ public final class MasterAntiGhost extends JavaPlugin {
     private CombatManager combatManager;
     private ManualResurrection manualResurrection;
     private FoliaScheduler foliaScheduler;
+    private PacketSwapInjector packetSwapInjector;
 
     @Override
     public void onEnable() {
@@ -48,8 +49,16 @@ public final class MasterAntiGhost extends JavaPlugin {
         DebugLogger.info("NMS accessor initialized successfully for version: " + nmsAccessor.getVersionTag());
 
         this.foliaScheduler = new FoliaScheduler(this);
+        DebugLogger.info("Scheduler backend: " + foliaScheduler.getBackend());
         this.swapBuffer = new SwapBuffer(pluginConfig.getSwapBufferTicks());
         this.manualResurrection = new ManualResurrection(nmsAccessor);
+        this.packetSwapInjector = new PacketSwapInjector(
+            this,
+            swapBuffer,
+            nmsAccessor,
+            foliaScheduler,
+            id -> combatManager.onPlayerQuit(id)
+        );
 
         this.combatManager = new CombatManager(
                 this,
@@ -65,7 +74,7 @@ public final class MasterAntiGhost extends JavaPlugin {
         );
 
         Bukkit.getPluginManager().registerEvents(new DamageListener(combatManager), this);
-        Bukkit.getPluginManager().registerEvents(new SwapListener(swapBuffer, nmsAccessor), this);
+        packetSwapInjector.start();
 
         var command = getCommand("masterantighost");
         if (command != null) {
@@ -86,6 +95,9 @@ public final class MasterAntiGhost extends JavaPlugin {
     public void onDisable() {
         if (combatManager != null) {
             combatManager.shutdown();
+        }
+        if (packetSwapInjector != null) {
+            packetSwapInjector.shutdown();
         }
         DebugLogger.info("MasterAntiGhost disabled. Stats — Fast pops: " + fastPathPops.sum()
                 + ", Reconciled pops: " + reconciledPops.sum()

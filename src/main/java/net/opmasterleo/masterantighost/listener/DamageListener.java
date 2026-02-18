@@ -7,7 +7,6 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
 
 public final class DamageListener implements Listener {
 
@@ -30,8 +29,11 @@ public final class DamageListener implements Listener {
 
         double health = player.getHealth();
         double finalDamage = event.getFinalDamage();
+        if (!Double.isFinite(finalDamage) || finalDamage <= 0.0d) {
+            return;
+        }
         double absorptionHearts = player.getAbsorptionAmount();
-        double effectiveDamage = finalDamage - absorptionHearts;
+        double effectiveDamage = Math.max(0.0d, finalDamage - absorptionHearts);
 
         if (effectiveDamage < health) {
             return;
@@ -41,8 +43,4 @@ public final class DamageListener implements Listener {
         combatManager.handleLethalDamage(player, event);
     }
 
-    @EventHandler
-    public void onPlayerQuit(PlayerQuitEvent event) {
-        combatManager.onPlayerQuit(event.getPlayer().getUniqueId());
-    }
 }

@@ -164,6 +164,15 @@ public final class CombatManager {
             return;
         }
 
+        if (player.isDead() || player.getHealth() <= 0.0d) {
+            cleanupPlayer(playerId);
+            AtomicReference<CombatState> staleState = playerStates.get(playerId);
+            if (staleState != null) {
+                staleState.set(CombatState.NORMAL);
+            }
+            return;
+        }
+
         AtomicReference<CombatState> stateRef = playerStates.get(playerId);
         if (stateRef == null || stateRef.get() != CombatState.PENDING_LETHAL) {
             return;

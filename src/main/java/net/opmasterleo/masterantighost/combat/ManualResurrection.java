@@ -16,13 +16,11 @@ public final class ManualResurrection {
     public boolean attemptResurrection(Player player) {
         DebugLogger.debug("Resurrection", "Attempting resurrection for %s", player.getName());
 
-        if (!nms.hasTotemInOffhand(player)) {
-            DebugLogger.debug("Resurrection", "No totem in offhand for %s — resurrection failed",
+        if (!nms.consumeOffhandTotemIfPresent(player)) {
+            DebugLogger.debug("Resurrection", "No consumable offhand totem for %s — resurrection failed",
                     player.getName());
             return false;
         }
-
-        nms.consumeOneTotemFromOffhand(player);
 
         nms.setHealthNms(player, 1.0f);
 

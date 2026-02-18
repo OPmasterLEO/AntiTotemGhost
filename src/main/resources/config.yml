@@ -5,6 +5,7 @@
 
 # Number of ticks to wait before reconciliation decision (default: 1)
 # Higher values give more time for packet processing but increase perceived latency.
+# Set to 0 for same-tick reconciliation (lowest latency, highest strictness).
 # Recommended: 1 for competitive servers, 2 for high-latency networks.
 reconciliation-ticks: 1
 

@@ -5,6 +5,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.bukkit.Bukkit;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
@@ -50,6 +51,7 @@ public final class NmsAccessorUniversal implements NmsAccessor {
     private final Method genericDamageSourceMethod;
     private final Method getTickCountMethod;
     private final Method getServerMethod;
+    private final Method bukkitCurrentTickMethod;
 
     private final Method inventoryBroadcastChangesMethod;
     private final Field inventoryMenuField;
@@ -57,6 +59,9 @@ public final class NmsAccessorUniversal implements NmsAccessor {
 
     private final Constructor<?> mobEffectInstanceCtor3;
     private final Constructor<?> mobEffectInstanceCtor6;
+
+    private final ConcurrentHashMap<Class<?>, Method> bukkitDamageSourceGetterCache;
+    private final ConcurrentHashMap<Class<?>, Method> bukkitDamageSourceHandleCache;
 
     public NmsAccessorUniversal(String bukkitVersion) {
         this.versionTag = bukkitVersion;
@@ -90,6 +95,7 @@ public final class NmsAccessorUniversal implements NmsAccessor {
         Method localGenericDamageSourceMethod = null;
         Method localGetTickCountMethod = null;
         Method localGetServerMethod = null;
+        Method localBukkitCurrentTickMethod = null;
         Method localInventoryBroadcastChangesMethod = null;
         Field localInventoryMenuField = null;
         Field localInvulnerableTimeField = null;
@@ -122,6 +128,11 @@ public final class NmsAccessorUniversal implements NmsAccessor {
             localDamageSourcesMethod = localServerPlayerClass.getMethod("damageSources");
             localGetTickCountMethod = localMinecraftServerClass.getMethod("getTickCount");
             localGetServerMethod = localMinecraftServerClass.getMethod("getServer");
+            try {
+                localBukkitCurrentTickMethod = Bukkit.class.getMethod("getCurrentTick");
+            } catch (NoSuchMethodException ignored) {
+                localBukkitCurrentTickMethod = null;
+            }
 
             Class<?> levelClass = Class.forName("net.minecraft.world.level.Level");
             localBroadcastEntityEventMethod = levelClass.getMethod("broadcastEntityEvent", Class.forName("net.minecraft.world.entity.Entity"), byte.class);
@@ -196,19 +207,26 @@ public final class NmsAccessorUniversal implements NmsAccessor {
         this.genericDamageSourceMethod = localGenericDamageSourceMethod;
         this.getTickCountMethod = localGetTickCountMethod;
         this.getServerMethod = localGetServerMethod;
+        this.bukkitCurrentTickMethod = localBukkitCurrentTickMethod;
         this.inventoryBroadcastChangesMethod = localInventoryBroadcastChangesMethod;
         this.inventoryMenuField = localInventoryMenuField;
         this.invulnerableTimeField = localInvulnerableTimeField;
         this.mobEffectInstanceCtor3 = localMobEffectInstanceCtor3;
         this.mobEffectInstanceCtor6 = localMobEffectInstanceCtor6;
+        this.bukkitDamageSourceGetterCache = new ConcurrentHashMap<>(4);
+        this.bukkitDamageSourceHandleCache = new ConcurrentHashMap<>(4);
         this.available = ok;
+
+        if (this.invulnerableTimeField != null) {
+            this.invulnerableTimeField.setAccessible(true);
+        }
     }
 
     @Override
     public boolean hasTotemInOffhand(Player player) {
         if (!available) return false;
         try {
-            Object nms = getHandleMethod.invoke(player);
+            Object nms = getHandleMethod.invoke((CraftPlayer) player);
             Object offhand = getItemBySlotMethod.invoke(nms, equipmentOffhand);
             boolean empty = (boolean) itemIsEmptyMethod.invoke(offhand);
             return !empty && (boolean) itemIsMethod.invoke(offhand, totemItem);
@@ -219,28 +237,35 @@ public final class NmsAccessorUniversal implements NmsAccessor {
     }
 
     @Override
-    public void consumeOneTotemFromOffhand(Player player) {
-        if (!available) return;
+    public boolean consumeOffhandTotemIfPresent(Player player) {
+        if (!available) return false;
         try {
-            Object nms = getHandleMethod.invoke(player);
+            Object nms = getHandleMethod.invoke((CraftPlayer) player);
             Object offhand = getItemBySlotMethod.invoke(nms, equipmentOffhand);
             boolean empty = (boolean) itemIsEmptyMethod.invoke(offhand);
-            if (empty) return;
+            if (empty) return false;
             boolean isTotem = (boolean) itemIsMethod.invoke(offhand, totemItem);
-            if (!isTotem) return;
+            if (!isTotem) return false;
             itemShrinkMethod.invoke(offhand, 1);
             Object menu = inventoryMenuField.get(nms);
             inventoryBroadcastChangesMethod.invoke(menu);
+            return true;
         } catch (Exception e) {
-            DebugLogger.warn("consumeOneTotemFromOffhand failed: " + e.getMessage());
+            DebugLogger.warn("consumeOffhandTotemIfPresent failed: " + e.getMessage());
+            return false;
         }
+    }
+
+    @Override
+    public void consumeOneTotemFromOffhand(Player player) {
+        consumeOffhandTotemIfPresent(player);
     }
 
     @Override
     public void setHealthNms(Player player, float health) {
         if (!available) return;
         try {
-            Object nms = getHandleMethod.invoke(player);
+            Object nms = getHandleMethod.invoke((CraftPlayer) player);
             setHealthMethod.invoke(nms, health);
         } catch (Exception e) {
             player.setHealth(Math.max(0.0, health));
@@ -251,7 +276,7 @@ public final class NmsAccessorUniversal implements NmsAccessor {
     public void removeAllEffectsNms(Player player) {
         if (!available) return;
         try {
-            Object nms = getHandleMethod.invoke(player);
+            Object nms = getHandleMethod.invoke((CraftPlayer) player);
             removeAllEffectsMethod.invoke(nms);
         } catch (Exception e) {
             player.getActivePotionEffects().forEach(pe -> player.removePotionEffect(pe.getType()));
@@ -262,7 +287,7 @@ public final class NmsAccessorUniversal implements NmsAccessor {
     public void applyTotemEffectsNms(Player player) {
         if (!available) return;
         try {
-            Object nms = getHandleMethod.invoke(player);
+            Object nms = getHandleMethod.invoke((CraftPlayer) player);
             addEffectMethod.invoke(nms, createEffect(effectRegeneration, 900, 1));
             addEffectMethod.invoke(nms, createEffect(effectAbsorption, 100, 1));
             addEffectMethod.invoke(nms, createEffect(effectFireResistance, 800, 0));
@@ -275,7 +300,7 @@ public final class NmsAccessorUniversal implements NmsAccessor {
     public void extinguishFireNms(Player player) {
         if (!available) return;
         try {
-            Object nms = getHandleMethod.invoke(player);
+            Object nms = getHandleMethod.invoke((CraftPlayer) player);
             setRemainingFireTicksMethod.invoke(nms, 0);
         } catch (Exception e) {
             player.setFireTicks(0);
@@ -286,7 +311,7 @@ public final class NmsAccessorUniversal implements NmsAccessor {
     public void broadcastTotemPopAnimation(Player player) {
         if (!available) return;
         try {
-            Object nms = getHandleMethod.invoke(player);
+            Object nms = getHandleMethod.invoke((CraftPlayer) player);
             Object level = serverLevelMethod.invoke(nms);
             broadcastEntityEventMethod.invoke(level, nms, (byte) 35);
         } catch (Exception e) {
@@ -298,10 +323,28 @@ public final class NmsAccessorUniversal implements NmsAccessor {
     public Object captureDamageSource(EntityDamageEvent event) {
         if (!available) return null;
         try {
-            Method damageSourceMethod = event.getClass().getMethod("getDamageSource");
+            Method damageSourceMethod = bukkitDamageSourceGetterCache.computeIfAbsent(event.getClass(), cls -> {
+                try {
+                    return cls.getMethod("getDamageSource");
+                } catch (NoSuchMethodException e) {
+                    return null;
+                }
+            });
+            if (damageSourceMethod == null) {
+                return null;
+            }
             Object bukkitDamageSource = damageSourceMethod.invoke(event);
             if (bukkitDamageSource == null) return null;
-            Method getHandle = bukkitDamageSource.getClass().getMethod("getHandle");
+            Method getHandle = bukkitDamageSourceHandleCache.computeIfAbsent(bukkitDamageSource.getClass(), cls -> {
+                try {
+                    return cls.getMethod("getHandle");
+                } catch (NoSuchMethodException e) {
+                    return null;
+                }
+            });
+            if (getHandle == null) {
+                return null;
+            }
             Object nmsDamageSource = getHandle.invoke(bukkitDamageSource);
             if (damageSourceClass.isInstance(nmsDamageSource)) {
                 return nmsDamageSource;
@@ -319,9 +362,8 @@ public final class NmsAccessorUniversal implements NmsAccessor {
             return;
         }
         try {
-            Object nms = getHandleMethod.invoke(player);
+            Object nms = getHandleMethod.invoke((CraftPlayer) player);
             if (invulnerableTimeField != null) {
-                invulnerableTimeField.setAccessible(true);
                 invulnerableTimeField.setInt(nms, 0);
             }
             Object source = nmsDamageSource;
@@ -338,16 +380,15 @@ public final class NmsAccessorUniversal implements NmsAccessor {
     @Override
     public long getCurrentTick() {
         try {
+            if (bukkitCurrentTickMethod != null) {
+                Object tick = bukkitCurrentTickMethod.invoke(null);
+                return ((Number) tick).longValue();
+            }
             Object server = getServerMethod.invoke(null);
             Object tick = getTickCountMethod.invoke(server);
             return ((Number) tick).longValue();
         } catch (Exception ignored) {
-            try {
-                Method m = Bukkit.class.getMethod("getCurrentTick");
-                return ((Number) m.invoke(null)).longValue();
-            } catch (Exception ignored2) {
-                return System.currentTimeMillis() / 50L;
-            }
+            return System.currentTimeMillis() / 50L;
         }
     }
 

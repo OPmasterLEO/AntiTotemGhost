@@ -19,7 +19,7 @@ public final class PluginConfig {
     public PluginConfig(FileConfiguration config) {
         this.reconciliationTicks = clamp(
                 config.getInt("reconciliation-ticks", DEFAULT_RECONCILIATION_TICKS),
-                1, 10, "reconciliation-ticks"
+            0, 10, "reconciliation-ticks"
         );
 
         this.swapBufferTicks = clamp(
