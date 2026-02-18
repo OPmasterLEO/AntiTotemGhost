@@ -201,6 +201,11 @@ public final class CombatManager {
             return;
         }
 
+        if (nms.hasTotemInEitherHand(player)) {
+            resolveAsResurrection(player, playerId, stateRef);
+            return;
+        }
+
         resolveAsDeath(player, playerId, stateRef);
     }
 

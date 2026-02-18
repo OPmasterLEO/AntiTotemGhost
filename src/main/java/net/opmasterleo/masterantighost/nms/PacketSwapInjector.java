@@ -149,14 +149,13 @@ public final class PacketSwapInjector {
 
     private void processPlayerSignals(UUID playerId, Player player) {
         try {
-            long tick = nms.getCurrentTick();
             while (true) {
                 SwapSignal signal = queuedSignals.remove(playerId);
                 if (signal == null) {
                     break;
                 }
                 boolean hadTotem = resolveTotemSignal(player, signal);
-                swapBuffer.recordSwap(playerId, tick, signal.type(), hadTotem);
+                swapBuffer.recordSwap(playerId, signal.capturedTick(), signal.type(), hadTotem);
             }
         } finally {
             scheduledPlayers.remove(playerId);
@@ -185,7 +184,8 @@ public final class PacketSwapInjector {
         }
         int mergedSlot = right.slot() >= 0 ? right.slot() : left.slot();
         int mergedButton = right.button() >= 0 ? right.button() : left.button();
-        return new SwapSignal(left.playerId(), left.type(), mergedSlot, mergedButton);
+        long mergedTick = Math.max(left.capturedTick(), right.capturedTick());
+        return new SwapSignal(left.playerId(), left.type(), mergedSlot, mergedButton, mergedTick);
     }
 
     private int signalPriority(SwapBuffer.SwapType type) {
@@ -236,13 +236,6 @@ public final class PacketSwapInjector {
                 return true;
             }
         } catch (Exception ignored) {
-        }
-
-        if (signal.type() == SwapBuffer.SwapType.NUMBER_KEY) {
-            int button = signal.button();
-            if (button >= 0 && button <= 8 && isTotem(player.getInventory().getItem(button))) {
-                return true;
-            }
         }
 
         return false;
@@ -399,7 +392,7 @@ public final class PacketSwapInjector {
                 try {
                     Object action = actionGetter.invoke(packet);
                     if (action instanceof Enum<?> actionEnum && "SWAP_ITEM_WITH_OFFHAND".equals(actionEnum.name())) {
-                        enqueueSignal(new SwapSignal(playerId, SwapBuffer.SwapType.OFFHAND_SWAP, -1, -1));
+                        enqueueSignal(new SwapSignal(playerId, SwapBuffer.SwapType.OFFHAND_SWAP, -1, -1, nms.getCurrentTick()));
                     }
                 } catch (Exception ignored) {
                 }
@@ -448,9 +441,9 @@ public final class PacketSwapInjector {
                 }
 
                 if ("SWAP".equals(click)) {
-                    enqueueSignal(new SwapSignal(playerId, SwapBuffer.SwapType.NUMBER_KEY, slot, button));
+                    enqueueSignal(new SwapSignal(playerId, SwapBuffer.SwapType.NUMBER_KEY, slot, button, nms.getCurrentTick()));
                 } else {
-                    enqueueSignal(new SwapSignal(playerId, SwapBuffer.SwapType.WINDOW_CLICK, slot, button));
+                    enqueueSignal(new SwapSignal(playerId, SwapBuffer.SwapType.WINDOW_CLICK, slot, button, nms.getCurrentTick()));
                 }
             } catch (Exception ignored) {
             }
@@ -579,7 +572,7 @@ public final class PacketSwapInjector {
     private record InjectionState(UUID playerId, Channel channel, String handlerName) {
     }
 
-    private record SwapSignal(UUID playerId, SwapBuffer.SwapType type, int slot, int button) {
+    private record SwapSignal(UUID playerId, SwapBuffer.SwapType type, int slot, int button, long capturedTick) {
     }
 
     private enum PacketKind {
