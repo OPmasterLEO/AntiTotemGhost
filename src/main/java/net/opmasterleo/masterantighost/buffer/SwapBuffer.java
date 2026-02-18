@@ -2,8 +2,8 @@ package net.opmasterleo.masterantighost.buffer;
 
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import net.opmasterleo.masterantighost.debug.DebugLogger;
 
@@ -15,10 +15,9 @@ public final class SwapBuffer {
         NUMBER_KEY
     }
 
-    public record SwapEntry(long tick, SwapType type, boolean hadTotem) {
-    }
+    private static final long UNSET_TICK = Long.MIN_VALUE;
 
-    private final ConcurrentHashMap<UUID, ConcurrentLinkedDeque<SwapEntry>> playerSwaps;
+    private final ConcurrentHashMap<UUID, PlayerSwapState> playerSwaps;
     private final AtomicInteger windowTicks;
 
     public SwapBuffer(int windowTicks) {
@@ -27,63 +26,50 @@ public final class SwapBuffer {
     }
 
     public void recordSwap(UUID playerId, long tick, SwapType type, boolean hadTotem) {
-        ConcurrentLinkedDeque<SwapEntry> entries = playerSwaps.computeIfAbsent(playerId, k -> new ConcurrentLinkedDeque<>());
-        entries.addLast(new SwapEntry(tick, type, hadTotem));
-        int trimWindow = windowTicks.get() + 20;
-        while (true) {
-            SwapEntry head = entries.peekFirst();
-            if (head == null || tick - head.tick() <= trimWindow) {
-                break;
-            }
-            entries.pollFirst();
+        PlayerSwapState state = playerSwaps.computeIfAbsent(playerId, ignored -> new PlayerSwapState());
+        state.latestSwapTick.accumulateAndGet(tick, Math::max);
+        if (hadTotem) {
+            state.latestTotemTick.accumulateAndGet(tick, Math::max);
         }
         DebugLogger.debug("SwapBuffer", "swap %s player=%s tick=%d hadTotem=%s", type, playerId, tick, hadTotem);
     }
 
     public boolean hasRecentTotemActivity(UUID playerId, long currentTick) {
-        ConcurrentLinkedDeque<SwapEntry> entries = playerSwaps.get(playerId);
-        if (entries == null || entries.isEmpty()) {
+        PlayerSwapState state = playerSwaps.get(playerId);
+        if (state == null) {
             return false;
         }
 
-        int window = windowTicks.get();
-        for (var it = entries.descendingIterator(); it.hasNext(); ) {
-            SwapEntry entry = it.next();
-            if (currentTick - entry.tick() > window) {
-                break;
-            }
-            if (entry.hadTotem()) {
-                return true;
-            }
+        long latestTotemTick = state.latestTotemTick.get();
+        if (latestTotemTick == UNSET_TICK) {
+            return false;
         }
-        return false;
+        return currentTick - latestTotemTick <= windowTicks.get();
     }
 
     public boolean hasAnyRecentSwapActivity(UUID playerId, long currentTick) {
-        ConcurrentLinkedDeque<SwapEntry> entries = playerSwaps.get(playerId);
-        if (entries == null || entries.isEmpty()) {
+        PlayerSwapState state = playerSwaps.get(playerId);
+        if (state == null) {
             return false;
         }
-        SwapEntry latest = entries.peekLast();
-        if (latest == null) {
+
+        long latestSwapTick = state.latestSwapTick.get();
+        if (latestSwapTick == UNSET_TICK) {
             return false;
         }
-        return currentTick - latest.tick() <= windowTicks.get();
+        return currentTick - latestSwapTick <= windowTicks.get();
     }
 
     public void cleanupExpired(long currentTick) {
-        int window = windowTicks.get();
-        playerSwaps.forEach((playerId, entries) -> {
-            while (!entries.isEmpty()) {
-                SwapEntry head = entries.peekFirst();
-                if (head != null && currentTick - head.tick() > window + 20) {
-                    entries.pollFirst();
-                } else {
-                    break;
-                }
+        int retentionTicks = windowTicks.get() + 20;
+        playerSwaps.forEach((playerId, state) -> {
+            long latest = Math.max(state.latestSwapTick.get(), state.latestTotemTick.get());
+            if (latest == UNSET_TICK) {
+                playerSwaps.remove(playerId, state);
+                return;
             }
-            if (entries.isEmpty()) {
-                playerSwaps.remove(playerId, entries);
+            if (currentTick - latest > retentionTicks) {
+                playerSwaps.remove(playerId, state);
             }
         });
     }
@@ -98,5 +84,10 @@ public final class SwapBuffer {
 
     public int getTrackedPlayerCount() {
         return playerSwaps.size();
+    }
+
+    private static final class PlayerSwapState {
+        private final AtomicLong latestSwapTick = new AtomicLong(UNSET_TICK);
+        private final AtomicLong latestTotemTick = new AtomicLong(UNSET_TICK);
     }
 }

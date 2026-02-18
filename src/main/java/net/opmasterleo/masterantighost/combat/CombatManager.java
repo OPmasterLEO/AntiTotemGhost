@@ -62,6 +62,7 @@ public final class CombatManager {
 
     public void handleLethalDamage(Player player, EntityDamageEvent event) {
         UUID playerId = player.getUniqueId();
+        PluginConfig config = configSupplier.get();
 
         if (bypassSet.remove(playerId)) {
             DebugLogger.debug(TAG, "Bypass active for %s", player.getName());
@@ -74,7 +75,7 @@ public final class CombatManager {
             return;
         }
 
-        if (configSupplier.get().isEnableFastPath()) {
+        if (config.isEnableFastPath()) {
             if (resurrection.attemptResurrection(player)) {
                 event.setCancelled(true);
                 fastPathPops.increment();
@@ -114,14 +115,9 @@ public final class CombatManager {
         long currentTick = nms.getCurrentTick();
         UUID attackerId = null;
 
-        try {
-            if (event.getDamageSource() != null) {
-                Entity causing = event.getDamageSource().getCausingEntity();
-                if (causing != null) {
-                    attackerId = causing.getUniqueId();
-                }
-            }
-        } catch (Exception ignored) {
+        Entity causing = event.getDamageSource().getCausingEntity();
+        if (causing != null) {
+            attackerId = causing.getUniqueId();
         }
 
         DamageContext context = new DamageContext(
@@ -179,6 +175,8 @@ public final class CombatManager {
             return;
         }
 
+        PluginConfig config = configSupplier.get();
+
         long currentTick = nms.getCurrentTick();
 
         if (nms.hasTotemInEitherHand(player)) {
@@ -186,7 +184,7 @@ public final class CombatManager {
             return;
         }
 
-        int maxAttempts = configSupplier.get().getSwapBufferTicks();
+        int maxAttempts = config.getSwapBufferTicks();
         if (swapBuffer.hasRecentTotemActivity(playerId, currentTick)) {
             if (attempt < maxAttempts) {
                 scheduleReconciliation(player, playerId, attempt + 1);
