@@ -30,6 +30,7 @@ public final class MasterAntiGhost extends JavaPlugin {
     private ManualResurrection manualResurrection;
     private FoliaScheduler foliaScheduler;
     private PacketSwapInjector packetSwapInjector;
+    private FoliaScheduler.ScheduledHandle maintenanceHandle;
 
     @Override
     public void onEnable() {
@@ -42,7 +43,8 @@ public final class MasterAntiGhost extends JavaPlugin {
         this.nmsAccessor = createNmsAccessor();
         if (!nmsAccessor.isAvailable()) {
             getLogger().severe("NMS accessor failed to initialize! Plugin will not function.");
-            getLogger().severe("Ensure you are running Paper/Folia 1.20.3 - 1.21.11");
+            getLogger().severe("Server internals were not compatible with dynamic NMS probe for version: "
+                    + Bukkit.getMinecraftVersion());
             Bukkit.getPluginManager().disablePlugin(this);
             return;
         }
@@ -83,7 +85,7 @@ public final class MasterAntiGhost extends JavaPlugin {
             command.setTabCompleter(cmdListener);
         }
 
-        foliaScheduler.runOnGlobalTimer(() -> {
+        maintenanceHandle = foliaScheduler.scheduleGlobalTimer(() -> {
             swapBuffer.cleanupExpired(nmsAccessor.getCurrentTick());
             combatManager.cleanupStaleEntries();
         }, 100L, 100L);
@@ -98,6 +100,10 @@ public final class MasterAntiGhost extends JavaPlugin {
         }
         if (packetSwapInjector != null) {
             packetSwapInjector.shutdown();
+        }
+        if (maintenanceHandle != null) {
+            maintenanceHandle.cancel();
+            maintenanceHandle = null;
         }
         DebugLogger.info("MasterAntiGhost disabled. Stats — Fast pops: " + fastPathPops.sum()
                 + ", Reconciled pops: " + reconciledPops.sum()
@@ -116,45 +122,7 @@ public final class MasterAntiGhost extends JavaPlugin {
     private NmsAccessor createNmsAccessor() {
         String version = Bukkit.getMinecraftVersion();
         DebugLogger.info("Detected Minecraft version: " + version);
-
-        if (!isSupportedVersion(version)) {
-            getLogger().severe("Unsupported Minecraft version " + version + ". Supported range: 1.20.3 - 1.21.11");
-            return new NmsAccessorUniversal(version);
-        }
-
         return new NmsAccessorUniversal(version);
-    }
-
-    private boolean isSupportedVersion(String version) {
-        int[] v = parseVersion(version);
-        int[] min = new int[]{1, 20, 3};
-        int[] max = new int[]{1, 21, 11};
-        return compareVersion(v, min) >= 0 && compareVersion(v, max) <= 0;
-    }
-
-    private int[] parseVersion(String version) {
-        String[] parts = version.split("\\.");
-        int major = parts.length > 0 ? parseInt(parts[0]) : 0;
-        int minor = parts.length > 1 ? parseInt(parts[1]) : 0;
-        int patch = parts.length > 2 ? parseInt(parts[2]) : 0;
-        return new int[]{major, minor, patch};
-    }
-
-    private int parseInt(String value) {
-        try {
-            return Integer.parseInt(value);
-        } catch (NumberFormatException ignored) {
-            return 0;
-        }
-    }
-
-    private int compareVersion(int[] a, int[] b) {
-        for (int i = 0; i < 3; i++) {
-            if (a[i] != b[i]) {
-                return Integer.compare(a[i], b[i]);
-            }
-        }
-        return 0;
     }
 
     public PluginConfig getPluginConfig() {
