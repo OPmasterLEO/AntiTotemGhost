@@ -1,12 +1,13 @@
 package net.opmasterleo.masterantighost.listener;
 
-import net.opmasterleo.masterantighost.combat.CombatManager;
-import net.opmasterleo.masterantighost.debug.DebugLogger;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
+
+import net.opmasterleo.masterantighost.combat.CombatManager;
+import net.opmasterleo.masterantighost.debug.DebugLogger;
 
 public final class DamageListener implements Listener {
 

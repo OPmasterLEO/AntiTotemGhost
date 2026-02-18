@@ -1,11 +1,11 @@
 package net.opmasterleo.masterantighost.buffer;
 
-import net.opmasterleo.masterantighost.debug.DebugLogger;
-
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import net.opmasterleo.masterantighost.debug.DebugLogger;
 
 public final class SwapBuffer {
 

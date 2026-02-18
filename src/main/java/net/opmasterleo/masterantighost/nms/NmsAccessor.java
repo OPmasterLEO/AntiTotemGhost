@@ -7,7 +7,11 @@ public interface NmsAccessor {
 
     boolean hasTotemInOffhand(Player player);
 
+    boolean hasTotemInEitherHand(Player player);
+
     boolean consumeOffhandTotemIfPresent(Player player);
+
+    boolean consumeTotemFromEitherHandIfPresent(Player player);
 
     void consumeOneTotemFromOffhand(Player player);
 

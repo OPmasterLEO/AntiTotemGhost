@@ -1,11 +1,12 @@
 package net.opmasterleo.masterantighost.scheduler;
 
+import java.util.Locale;
+import java.util.function.Consumer;
+
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Entity;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitTask;
-
-import java.util.Locale;
 
 public final class FoliaScheduler {
 
@@ -39,77 +40,110 @@ public final class FoliaScheduler {
     }
 
     public void runOnEntityThread(Entity entity, Runnable task) {
+        Runnable safeTask = wrap(task);
         if (FOLIA) {
-            entity.getScheduler().run(plugin, scheduledTask -> task.run(), null);
+            entity.getScheduler().run(plugin, scheduledTask -> safeTask.run(), () -> {
+            });
         } else {
-            Bukkit.getScheduler().runTask(plugin, task);
+            Bukkit.getScheduler().runTask(plugin, safeTask);
         }
     }
 
     public void runOnEntityThreadDelayed(Entity entity, Runnable task, long delayTicks) {
+        long delay = Math.max(0L, delayTicks);
+        Runnable safeTask = wrap(task);
         if (FOLIA) {
-            entity.getScheduler().runDelayed(plugin, scheduledTask -> task.run(), null, delayTicks);
+            entity.getScheduler().runDelayed(plugin, scheduledTask -> safeTask.run(), () -> {
+            }, delay);
         } else {
-            Bukkit.getScheduler().runTaskLater(plugin, task, delayTicks);
+            Bukkit.getScheduler().runTaskLater(plugin, safeTask, delay);
         }
     }
 
     public void runOnGlobalTimer(Runnable task, long initialDelay, long periodTicks) {
+        Runnable safeTask = wrap(task);
         if (FOLIA) {
             Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin,
-                    scheduledTask -> task.run(), initialDelay, periodTicks);
+                    scheduledTask -> safeTask.run(), Math.max(0L, initialDelay), Math.max(1L, periodTicks));
         } else {
-            Bukkit.getScheduler().runTaskTimer(plugin, task, initialDelay, periodTicks);
+            Bukkit.getScheduler().runTaskTimer(plugin, safeTask, Math.max(0L, initialDelay), Math.max(1L, periodTicks));
         }
     }
 
     public void runOnAsync(Runnable task) {
+        Runnable safeTask = wrap(task);
         if (FOLIA) {
-            Bukkit.getAsyncScheduler().runNow(plugin, scheduledTask -> task.run());
+            Bukkit.getAsyncScheduler().runNow(plugin, scheduledTask -> safeTask.run());
         } else {
-            Bukkit.getScheduler().runTaskAsynchronously(plugin, task);
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, safeTask);
         }
     }
 
     public void runOnAsyncDelayed(Runnable task, long delayTicks) {
+        Runnable safeTask = wrap(task);
         if (FOLIA) {
             long delayMillis = ticksToMillis(delayTicks);
-            Bukkit.getAsyncScheduler().runDelayed(plugin, scheduledTask -> task.run(), delayMillis,
+            Bukkit.getAsyncScheduler().runDelayed(plugin, scheduledTask -> safeTask.run(), delayMillis,
                     java.util.concurrent.TimeUnit.MILLISECONDS);
         } else {
-            Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, task, delayTicks);
+            Bukkit.getScheduler().runTaskLaterAsynchronously(plugin, safeTask, Math.max(0L, delayTicks));
         }
     }
 
     public ScheduledHandle scheduleGlobalTimer(Runnable task, long initialDelay, long periodTicks) {
+        Runnable safeTask = wrap(task);
         if (FOLIA) {
             var scheduled = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin,
-                    tickTask -> task.run(), initialDelay, periodTicks);
+                    tickTask -> safeTask.run(), Math.max(0L, initialDelay), Math.max(1L, periodTicks));
             return scheduled::cancel;
         }
-        BukkitTask bukkitTask = Bukkit.getScheduler().runTaskTimer(plugin, task, initialDelay, periodTicks);
+        BukkitTask bukkitTask = Bukkit.getScheduler().runTaskTimer(plugin, safeTask, Math.max(0L, initialDelay), Math.max(1L, periodTicks));
         return bukkitTask::cancel;
     }
 
     public ScheduledHandle scheduleAsyncTimer(Runnable task, long initialDelayTicks, long periodTicks) {
+        Runnable safeTask = wrap(task);
         if (FOLIA) {
             long initialDelayMillis = ticksToMillis(initialDelayTicks);
             long periodMillis = ticksToMillis(periodTicks);
             var scheduled = Bukkit.getAsyncScheduler().runAtFixedRate(plugin,
-                    asyncTask -> task.run(), initialDelayMillis, periodMillis,
+                    asyncTask -> safeTask.run(), initialDelayMillis, periodMillis,
                     java.util.concurrent.TimeUnit.MILLISECONDS);
             return scheduled::cancel;
         }
-        BukkitTask bukkitTask = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, task, initialDelayTicks, periodTicks);
+        BukkitTask bukkitTask = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, safeTask,
+                Math.max(0L, initialDelayTicks), Math.max(1L, periodTicks));
         return bukkitTask::cancel;
     }
 
     public void runOnGlobal(Runnable task) {
+        Runnable safeTask = wrap(task);
         if (FOLIA) {
-            Bukkit.getGlobalRegionScheduler().run(plugin, scheduledTask -> task.run());
+            Bukkit.getGlobalRegionScheduler().run(plugin, scheduledTask -> safeTask.run());
         } else {
-            Bukkit.getScheduler().runTask(plugin, task);
+            Bukkit.getScheduler().runTask(plugin, safeTask);
         }
+    }
+
+    public ScheduledHandle scheduleEntityTimer(Entity entity, Runnable task, long initialDelayTicks, long periodTicks) {
+        Runnable safeTask = wrap(task);
+        if (FOLIA) {
+            var scheduled = entity.getScheduler().runAtFixedRate(plugin,
+                    scheduledTask -> safeTask.run(), () -> {
+                    }, Math.max(0L, initialDelayTicks), Math.max(1L, periodTicks));
+            return scheduled::cancel;
+        }
+        BukkitTask bukkitTask = Bukkit.getScheduler().runTaskTimer(plugin, safeTask,
+                Math.max(0L, initialDelayTicks), Math.max(1L, periodTicks));
+        return bukkitTask::cancel;
+    }
+
+    public void runOnEntityThreadIfOnline(java.util.UUID playerId, Consumer<org.bukkit.entity.Player> task) {
+        org.bukkit.entity.Player player = Bukkit.getPlayer(playerId);
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        runOnEntityThread(player, () -> task.accept(player));
     }
 
     private static SchedulerBackend detectBackend(boolean folia) {
@@ -136,6 +170,16 @@ public final class FoliaScheduler {
 
     private static long ticksToMillis(long ticks) {
         return Math.max(0L, ticks) * 50L;
+    }
+
+    private Runnable wrap(Runnable delegate) {
+        return () -> {
+            try {
+                delegate.run();
+            } catch (Throwable throwable) {
+                plugin.getLogger().severe("Scheduled task failed: " + throwable.getMessage());
+            }
+        };
     }
 
     public enum SchedulerBackend {

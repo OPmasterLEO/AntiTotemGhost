@@ -16,8 +16,8 @@ public final class ManualResurrection {
     public boolean attemptResurrection(Player player) {
         DebugLogger.debug("Resurrection", "Attempting resurrection for %s", player.getName());
 
-        if (!nms.consumeOffhandTotemIfPresent(player)) {
-            DebugLogger.debug("Resurrection", "No consumable offhand totem for %s — resurrection failed",
+        if (!nms.consumeTotemFromEitherHandIfPresent(player)) {
+            DebugLogger.debug("Resurrection", "No consumable hand totem for %s — resurrection failed",
                     player.getName());
             return false;
         }

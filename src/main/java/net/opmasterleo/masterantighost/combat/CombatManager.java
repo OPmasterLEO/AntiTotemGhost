@@ -1,21 +1,22 @@
 package net.opmasterleo.masterantighost.combat;
 
-import net.opmasterleo.masterantighost.buffer.SwapBuffer;
-import net.opmasterleo.masterantighost.config.PluginConfig;
-import net.opmasterleo.masterantighost.debug.DebugLogger;
-import net.opmasterleo.masterantighost.nms.NmsAccessor;
-import net.opmasterleo.masterantighost.scheduler.FoliaScheduler;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.Player;
-import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.plugin.Plugin;
-
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Supplier;
+
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.plugin.Plugin;
+
+import net.opmasterleo.masterantighost.buffer.SwapBuffer;
+import net.opmasterleo.masterantighost.config.PluginConfig;
+import net.opmasterleo.masterantighost.debug.DebugLogger;
+import net.opmasterleo.masterantighost.nms.NmsAccessor;
+import net.opmasterleo.masterantighost.scheduler.FoliaScheduler;
 
 public final class CombatManager {
 
@@ -180,7 +181,7 @@ public final class CombatManager {
 
         long currentTick = nms.getCurrentTick();
 
-        if (nms.hasTotemInOffhand(player)) {
+        if (nms.hasTotemInEitherHand(player)) {
             resolveAsResurrection(player, playerId, stateRef);
             return;
         }
@@ -191,7 +192,7 @@ public final class CombatManager {
                 scheduleReconciliation(player, playerId, attempt + 1);
                 return;
             }
-            if (nms.hasTotemInOffhand(player)) {
+            if (nms.hasTotemInEitherHand(player)) {
                 resolveAsResurrection(player, playerId, stateRef);
                 return;
             }

@@ -29,6 +29,7 @@ public final class NmsAccessorUniversal implements NmsAccessor {
     private final Class<?> damageSourceClass;
     private final Class<?> minecraftServerClass;
 
+    private final Object equipmentMainhand;
     private final Object equipmentOffhand;
     private final Object totemItem;
     private final Object effectRegeneration;
@@ -74,6 +75,7 @@ public final class NmsAccessorUniversal implements NmsAccessor {
         Class<?> localMobEffectInstanceClass = null;
         Class<?> localDamageSourceClass = null;
         Class<?> localMinecraftServerClass = null;
+        Object localEquipmentMainhand = null;
         Object localEquipmentOffhand = null;
         Object localTotemItem = null;
         Object localEffectRegeneration = null;
@@ -138,6 +140,13 @@ public final class NmsAccessorUniversal implements NmsAccessor {
             localBroadcastEntityEventMethod = levelClass.getMethod("broadcastEntityEvent", Class.forName("net.minecraft.world.entity.Entity"), byte.class);
 
             Object[] slots = localEquipmentSlotClass.getEnumConstants();
+                localEquipmentMainhand = Arrays.stream(slots)
+                    .filter(slot -> {
+                    String name = ((Enum<?>) slot).name();
+                    return name.equals("MAINHAND") || name.equals("HAND");
+                    })
+                    .findFirst()
+                    .orElseThrow();
             localEquipmentOffhand = Arrays.stream(slots)
                     .filter(slot -> ((Enum<?>) slot).name().equals("OFFHAND"))
                     .findFirst()
@@ -186,6 +195,7 @@ public final class NmsAccessorUniversal implements NmsAccessor {
         this.mobEffectInstanceClass = localMobEffectInstanceClass;
         this.damageSourceClass = localDamageSourceClass;
         this.minecraftServerClass = localMinecraftServerClass;
+        this.equipmentMainhand = localEquipmentMainhand;
         this.equipmentOffhand = localEquipmentOffhand;
         this.totemItem = localTotemItem;
         this.effectRegeneration = localEffectRegeneration;
@@ -227,11 +237,21 @@ public final class NmsAccessorUniversal implements NmsAccessor {
         if (!available) return false;
         try {
             Object nms = getHandleMethod.invoke((CraftPlayer) player);
-            Object offhand = getItemBySlotMethod.invoke(nms, equipmentOffhand);
-            boolean empty = (boolean) itemIsEmptyMethod.invoke(offhand);
-            return !empty && (boolean) itemIsMethod.invoke(offhand, totemItem);
+            return hasTotemInSlot(nms, equipmentOffhand);
         } catch (Exception e) {
             DebugLogger.warn("hasTotemInOffhand failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    public boolean hasTotemInEitherHand(Player player) {
+        if (!available) return false;
+        try {
+            Object nms = getHandleMethod.invoke((CraftPlayer) player);
+            return hasTotemInSlot(nms, equipmentOffhand) || hasTotemInSlot(nms, equipmentMainhand);
+        } catch (Exception e) {
+            DebugLogger.warn("hasTotemInEitherHand failed: " + e.getMessage());
             return false;
         }
     }
@@ -241,17 +261,24 @@ public final class NmsAccessorUniversal implements NmsAccessor {
         if (!available) return false;
         try {
             Object nms = getHandleMethod.invoke((CraftPlayer) player);
-            Object offhand = getItemBySlotMethod.invoke(nms, equipmentOffhand);
-            boolean empty = (boolean) itemIsEmptyMethod.invoke(offhand);
-            if (empty) return false;
-            boolean isTotem = (boolean) itemIsMethod.invoke(offhand, totemItem);
-            if (!isTotem) return false;
-            itemShrinkMethod.invoke(offhand, 1);
-            Object menu = inventoryMenuField.get(nms);
-            inventoryBroadcastChangesMethod.invoke(menu);
-            return true;
+            return consumeTotemInSlotIfPresent(nms, equipmentOffhand);
         } catch (Exception e) {
             DebugLogger.warn("consumeOffhandTotemIfPresent failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    public boolean consumeTotemFromEitherHandIfPresent(Player player) {
+        if (!available) return false;
+        try {
+            Object nms = getHandleMethod.invoke((CraftPlayer) player);
+            if (consumeTotemInSlotIfPresent(nms, equipmentOffhand)) {
+                return true;
+            }
+            return consumeTotemInSlotIfPresent(nms, equipmentMainhand);
+        } catch (Exception e) {
+            DebugLogger.warn("consumeTotemFromEitherHandIfPresent failed: " + e.getMessage());
             return false;
         }
     }
@@ -407,6 +434,31 @@ public final class NmsAccessorUniversal implements NmsAccessor {
             return mobEffectInstanceCtor3.newInstance(mobEffect, duration, amplifier);
         }
         return mobEffectInstanceCtor6.newInstance(mobEffect, duration, amplifier, false, true, true);
+    }
+
+    private boolean hasTotemInSlot(Object nmsPlayer, Object equipmentSlot) throws Exception {
+        Object item = getItemBySlotMethod.invoke(nmsPlayer, equipmentSlot);
+        boolean empty = (boolean) itemIsEmptyMethod.invoke(item);
+        if (empty) {
+            return false;
+        }
+        return (boolean) itemIsMethod.invoke(item, totemItem);
+    }
+
+    private boolean consumeTotemInSlotIfPresent(Object nmsPlayer, Object equipmentSlot) throws Exception {
+        Object item = getItemBySlotMethod.invoke(nmsPlayer, equipmentSlot);
+        boolean empty = (boolean) itemIsEmptyMethod.invoke(item);
+        if (empty) {
+            return false;
+        }
+        boolean isTotem = (boolean) itemIsMethod.invoke(item, totemItem);
+        if (!isTotem) {
+            return false;
+        }
+        itemShrinkMethod.invoke(item, 1);
+        Object menu = inventoryMenuField.get(nmsPlayer);
+        inventoryBroadcastChangesMethod.invoke(menu);
+        return true;
     }
 
     private static Field findField(Class<?> type, List<String> names) {
