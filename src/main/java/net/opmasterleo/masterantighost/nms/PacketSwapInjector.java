@@ -1,5 +1,20 @@
 package net.opmasterleo.masterantighost.nms;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
+
+import org.bukkit.Bukkit;
+import org.bukkit.Material;
+import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
+
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -7,21 +22,6 @@ import io.netty.channel.ChannelPipeline;
 import net.opmasterleo.masterantighost.buffer.SwapBuffer;
 import net.opmasterleo.masterantighost.debug.DebugLogger;
 import net.opmasterleo.masterantighost.scheduler.FoliaScheduler;
-import org.bukkit.Bukkit;
-import org.bukkit.Material;
-import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.plugin.Plugin;
-
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Consumer;
 
 public final class PacketSwapInjector {
 
@@ -127,25 +127,35 @@ public final class PacketSwapInjector {
         if (!scheduledPlayers.add(playerId)) {
             return;
         }
-        scheduler.runOnEntityThreadIfOnline(playerId, player -> {
-            if (!player.isOnline()) {
+
+        Player player = Bukkit.getPlayer(playerId);
+        if (player == null || !player.isOnline()) {
+            queuedSignals.remove(playerId);
+            scheduledPlayers.remove(playerId);
+            disconnectHandler.accept(playerId);
+            return;
+        }
+
+        scheduler.runOnEntityThreadIfOnline(playerId, target -> {
+            if (!target.isOnline()) {
                 queuedSignals.remove(playerId);
                 scheduledPlayers.remove(playerId);
+                disconnectHandler.accept(playerId);
                 return;
             }
-            processPlayerSignals(playerId, player);
+            processPlayerSignals(playerId, target);
         });
     }
 
     private void processPlayerSignals(UUID playerId, Player player) {
         try {
+            long tick = nms.getCurrentTick();
             while (true) {
                 SwapSignal signal = queuedSignals.remove(playerId);
                 if (signal == null) {
                     break;
                 }
                 boolean hadTotem = resolveTotemSignal(player, signal);
-                long tick = nms.getCurrentTick();
                 swapBuffer.recordSwap(playerId, tick, signal.type(), hadTotem);
             }
         } finally {
@@ -155,6 +165,7 @@ public final class PacketSwapInjector {
                     if (!target.isOnline()) {
                         queuedSignals.remove(playerId);
                         scheduledPlayers.remove(playerId);
+                        disconnectHandler.accept(playerId);
                         return;
                     }
                     processPlayerSignals(playerId, target);
@@ -164,7 +175,12 @@ public final class PacketSwapInjector {
     }
 
     private SwapSignal mergeSignals(SwapSignal left, SwapSignal right) {
-        if (signalPriority(right.type()) > signalPriority(left.type())) {
+        int rightPriority = signalPriority(right.type());
+        int leftPriority = signalPriority(left.type());
+        if (rightPriority > leftPriority) {
+            return right;
+        }
+        if (rightPriority == leftPriority) {
             return right;
         }
         int mergedSlot = right.slot() >= 0 ? right.slot() : left.slot();
