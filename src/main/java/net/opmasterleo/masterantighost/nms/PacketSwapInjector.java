@@ -1,10 +1,7 @@
 package net.opmasterleo.masterantighost.nms;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -12,572 +9,299 @@ import java.util.function.Consumer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.HandlerList;
+import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.ClickType;
+import org.bukkit.event.inventory.InventoryAction;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelPipeline;
+import net.minecraft.network.protocol.game.ServerboundContainerClickPacket;
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.opmasterleo.masterantighost.buffer.SwapBuffer;
 import net.opmasterleo.masterantighost.debug.DebugLogger;
 import net.opmasterleo.masterantighost.scheduler.FoliaScheduler;
 
-public final class PacketSwapInjector {
+public final class PacketSwapInjector implements Listener {
 
     private static final String TAG = "PacketSwapInjector";
-    private static final String HANDLER_PREFIX = "mag_swap_inject_";
+    private static final String HANDLER_PREFIX = "mag_swap_";
+    private static final int PLAYER_OFFHAND_SLOT = 40;
+    private static final int CONTAINER_OFFHAND_SLOT = 45;
 
     private final Plugin plugin;
     private final SwapBuffer swapBuffer;
-    private final NmsAccessor nms;
+    private final NmsAccessor nmsAccessor;
     private final FoliaScheduler scheduler;
-    private final Consumer<UUID> disconnectHandler;
+    private final Consumer<UUID> onPlayerQuit;
+    private final Map<UUID, Channel> injectedChannels = new ConcurrentHashMap<>();
 
-    private final Map<UUID, InjectionState> injected;
-    private final Map<UUID, SwapSignal> queuedSignals;
-    private final Set<UUID> scheduledPlayers;
-    private final Map<Class<?>, Method> actionGetterCache;
-    private final Map<Class<?>, Method> clickTypeGetterCache;
-    private final Map<Class<?>, Method> slotGetterCache;
-    private final Map<Class<?>, Method> buttonGetterCache;
-    private final Map<Class<?>, PacketKind> packetKindCache;
-    private final Map<Class<?>, Method> handleGetterCache;
-    private final Map<Class<?>, Field> playerConnectionFieldCache;
-    private final Map<Class<?>, Field> listenerConnectionFieldCache;
-    private final Map<Class<?>, Field> channelFieldCache;
-
-    private volatile FoliaScheduler.ScheduledHandle refreshHandle;
+    private volatile boolean started;
 
     public PacketSwapInjector(Plugin plugin,
                               SwapBuffer swapBuffer,
-                              NmsAccessor nms,
+                              NmsAccessor nmsAccessor,
                               FoliaScheduler scheduler,
-                              Consumer<UUID> disconnectHandler) {
+                              Consumer<UUID> onPlayerQuit) {
         this.plugin = plugin;
         this.swapBuffer = swapBuffer;
-        this.nms = nms;
+        this.nmsAccessor = nmsAccessor;
         this.scheduler = scheduler;
-        this.disconnectHandler = disconnectHandler;
-        this.injected = new ConcurrentHashMap<>(128);
-        this.queuedSignals = new ConcurrentHashMap<>(128);
-        this.scheduledPlayers = ConcurrentHashMap.newKeySet(128);
-        this.actionGetterCache = new ConcurrentHashMap<>(8);
-        this.clickTypeGetterCache = new ConcurrentHashMap<>(8);
-        this.slotGetterCache = new ConcurrentHashMap<>(8);
-        this.buttonGetterCache = new ConcurrentHashMap<>(8);
-        this.packetKindCache = new ConcurrentHashMap<>(16);
-        this.handleGetterCache = new ConcurrentHashMap<>(8);
-        this.playerConnectionFieldCache = new ConcurrentHashMap<>(8);
-        this.listenerConnectionFieldCache = new ConcurrentHashMap<>(8);
-        this.channelFieldCache = new ConcurrentHashMap<>(8);
+        this.onPlayerQuit = onPlayerQuit;
     }
 
     public void start() {
-        refreshInjections();
-        refreshHandle = scheduler.scheduleGlobalTimer(this::refreshInjections, 20L, 20L);
+        if (started) {
+            return;
+        }
+        started = true;
+
+        Bukkit.getPluginManager().registerEvents(this, plugin);
+
+        int injected = 0;
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (injectWithRetry(player, 2)) {
+                injected++;
+            }
+        }
+
+        DebugLogger.info("Swap tracking initialized. Packet-injected players=" + injected
+                + ", Bukkit fallback listeners=enabled");
     }
 
     public void shutdown() {
-        FoliaScheduler.ScheduledHandle localRefresh = refreshHandle;
-        if (localRefresh != null) {
-            localRefresh.cancel();
-            refreshHandle = null;
+        if (!started) {
+            return;
         }
-        queuedSignals.clear();
-        scheduledPlayers.clear();
-        for (InjectionState state : injected.values()) {
-            safeUninject(state);
-            disconnectHandler.accept(state.playerId());
+        started = false;
+
+        HandlerList.unregisterAll(this);
+
+        for (UUID playerId : injectedChannels.keySet()) {
+            uninject(playerId);
         }
-        injected.clear();
+        injectedChannels.clear();
     }
 
-    private void refreshInjections() {
-        Set<UUID> online = ConcurrentHashMap.newKeySet(Bukkit.getOnlinePlayers().size() + 2);
-
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            UUID playerId = player.getUniqueId();
-            online.add(playerId);
-            injected.computeIfAbsent(playerId, id -> {
-                Channel channel = resolveChannel(player);
-                if (channel == null) {
-                    return null;
-                }
-                InjectionState state = new InjectionState(id, channel, HANDLER_PREFIX + id.toString().replace("-", ""));
-                safeInject(player, state);
-                return state;
-            });
-        }
-
-        injected.forEach((playerId, state) -> {
-            if (state != null && !online.contains(playerId)) {
-                safeUninject(state);
-                injected.remove(playerId, state);
-                queuedSignals.remove(playerId);
-                scheduledPlayers.remove(playerId);
-                disconnectHandler.accept(playerId);
-            }
-        });
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        injectWithRetry(event.getPlayer(), 5);
     }
 
-    private void enqueueSignal(SwapSignal signal) {
-        UUID playerId = signal.playerId();
-        queuedSignals.merge(playerId, signal, this::mergeSignals);
-        if (!scheduledPlayers.add(playerId)) {
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerQuitEvent(PlayerQuitEvent event) {
+        UUID playerId = event.getPlayer().getUniqueId();
+        uninject(playerId);
+        onPlayerQuit.accept(playerId);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onSwapHandItems(PlayerSwapHandItemsEvent event) {
+        boolean hadTotemInSwap = isTotem(event.getMainHandItem()) || isTotem(event.getOffHandItem());
+        recordSwap(event.getPlayer(), SwapBuffer.SwapType.OFFHAND_SWAP, hadTotemInSwap);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)) {
             return;
         }
 
-        Player player = Bukkit.getPlayer(playerId);
-        if (player == null || !player.isOnline()) {
-            queuedSignals.remove(playerId);
-            scheduledPlayers.remove(playerId);
-            disconnectHandler.accept(playerId);
+        ClickType clickType = event.getClick();
+        InventoryAction action = event.getAction();
+
+        if (clickType == ClickType.SWAP_OFFHAND) {
+            recordSwap(player, SwapBuffer.SwapType.OFFHAND_SWAP, true);
             return;
         }
 
-        scheduler.runOnEntityThreadIfOnline(playerId, target -> {
-            if (!target.isOnline()) {
-                queuedSignals.remove(playerId);
-                scheduledPlayers.remove(playerId);
-                disconnectHandler.accept(playerId);
-                return;
-            }
-            processPlayerSignals(playerId, target);
-        });
-    }
+        if (clickType == ClickType.NUMBER_KEY
+                || action == InventoryAction.HOTBAR_SWAP) {
+            recordSwap(player, SwapBuffer.SwapType.NUMBER_KEY, true);
+            return;
+        }
 
-    private void processPlayerSignals(UUID playerId, Player player) {
-        try {
-            while (true) {
-                SwapSignal signal = queuedSignals.remove(playerId);
-                if (signal == null) {
-                    break;
-                }
-                boolean hadTotem = resolveTotemSignal(player, signal);
-                swapBuffer.recordSwap(playerId, signal.capturedTick(), signal.type(), hadTotem);
-            }
-        } finally {
-            scheduledPlayers.remove(playerId);
-            if (queuedSignals.containsKey(playerId) && scheduledPlayers.add(playerId)) {
-                scheduler.runOnEntityThreadIfOnline(playerId, target -> {
-                    if (!target.isOnline()) {
-                        queuedSignals.remove(playerId);
-                        scheduledPlayers.remove(playerId);
-                        disconnectHandler.accept(playerId);
-                        return;
-                    }
-                    processPlayerSignals(playerId, target);
-                });
-            }
+        if (event.getSlot() == PLAYER_OFFHAND_SLOT || event.getRawSlot() == CONTAINER_OFFHAND_SLOT) {
+            recordSwap(player, SwapBuffer.SwapType.WINDOW_CLICK, true);
         }
     }
 
-    private SwapSignal mergeSignals(SwapSignal left, SwapSignal right) {
-        int rightPriority = signalPriority(right.type());
-        int leftPriority = signalPriority(left.type());
-        if (rightPriority > leftPriority) {
-            return right;
-        }
-        if (rightPriority == leftPriority) {
-            return right;
-        }
-        int mergedSlot = right.slot() >= 0 ? right.slot() : left.slot();
-        int mergedButton = right.button() >= 0 ? right.button() : left.button();
-        long mergedTick = Math.max(left.capturedTick(), right.capturedTick());
-        return new SwapSignal(left.playerId(), left.type(), mergedSlot, mergedButton, mergedTick);
-    }
-
-    private int signalPriority(SwapBuffer.SwapType type) {
-        return switch (type) {
-            case OFFHAND_SWAP -> 3;
-            case NUMBER_KEY -> 2;
-            case WINDOW_CLICK -> 1;
-        };
-    }
-
-    private boolean resolveTotemSignal(Player player, SwapSignal signal) {
-        if (signal.type() == SwapBuffer.SwapType.OFFHAND_SWAP) {
-            return isTotem(player.getInventory().getItemInOffHand()) || isTotem(player.getInventory().getItemInMainHand());
-        }
-
-        if (!isLikelyOffhandInteraction(player, signal)) {
-            return false;
-        }
-
-        if (isTotem(player.getInventory().getItemInOffHand())) {
+    private boolean injectWithRetry(Player player, int retries) {
+        if (inject(player)) {
             return true;
         }
 
-        int button = signal.button();
-        if (button >= 0 && button <= 8) {
-            return isTotem(player.getInventory().getItem(button));
-        }
-
-        try {
-            return isTotem(player.getItemOnCursor()) || isTotem(player.getOpenInventory().getItem(signal.slot()));
-        } catch (Exception ignored) {
+        if (retries <= 0) {
             return false;
         }
-    }
 
-    private boolean isLikelyOffhandInteraction(Player player, SwapSignal signal) {
-        int slot = signal.slot();
-        if (slot < 0) {
-            return false;
-        }
-        if (slot == 45 || slot == 40) {
-            return true;
-        }
-
-        try {
-            int topSize = player.getOpenInventory().getTopInventory().getSize();
-            if (slot == topSize + 45 || slot == topSize + 40) {
-                return true;
-            }
-        } catch (Exception ignored) {
-        }
-
+        scheduler.runOnEntityThreadDelayed(player, () -> injectWithRetry(player, retries - 1), 1L);
         return false;
     }
 
-    private static boolean isTotem(ItemStack item) {
-        return item != null && item.getType() == Material.TOTEM_OF_UNDYING;
-    }
+    private boolean inject(Player player) {
+        UUID playerId = player.getUniqueId();
+        if (injectedChannels.containsKey(playerId)) {
+            return true;
+        }
 
-    private void safeInject(Player player, InjectionState state) {
-        Channel channel = state.channel();
-        channel.eventLoop().execute(() -> {
-            try {
-                ChannelPipeline pipeline = channel.pipeline();
-                if (pipeline.get(state.handlerName()) != null) {
+        try {
+            Channel channel = resolveChannel(player);
+            if (channel == null) {
+                return false;
+            }
+
+            String handlerName = handlerName(playerId);
+            channel.eventLoop().execute(() -> {
+                if (!channel.isOpen() || channel.pipeline().get(handlerName) != null) {
                     return;
                 }
-                ChannelDuplexHandler handler = new SwapPacketHandler(player.getUniqueId());
-                if (pipeline.get("packet_handler") != null) {
-                    pipeline.addBefore("packet_handler", state.handlerName(), handler);
+
+                ChannelDuplexHandler handler = new ChannelDuplexHandler() {
+                    @Override
+                    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+                        try {
+                            handleInboundPacket(playerId, msg);
+                        } catch (Throwable throwable) {
+                            DebugLogger.debug(TAG, "Inbound packet inspect failed for %s: %s",
+                                    playerId, throwable.getMessage());
+                        }
+                        super.channelRead(ctx, msg);
+                    }
+                };
+
+                if (channel.pipeline().get("packet_handler") != null) {
+                    channel.pipeline().addBefore("packet_handler", handlerName, handler);
                 } else {
-                    pipeline.addLast(state.handlerName(), handler);
-                }
-            } catch (Exception e) {
-                DebugLogger.warn(TAG + " inject failed for " + player.getName() + ": " + e.getMessage());
-            }
-        });
-    }
-
-    private void safeUninject(InjectionState state) {
-        Channel channel = state.channel();
-        channel.eventLoop().execute(() -> {
-            try {
-                ChannelPipeline pipeline = channel.pipeline();
-                if (pipeline.get(state.handlerName()) != null) {
-                    pipeline.remove(state.handlerName());
-                }
-            } catch (Exception ignored) {
-            }
-        });
-    }
-
-    private Channel resolveChannel(Player player) {
-        try {
-            Method getHandle = handleGetterCache.computeIfAbsent(player.getClass(), cls -> {
-                try {
-                    return cls.getMethod("getHandle");
-                } catch (NoSuchMethodException e) {
-                    return null;
+                    channel.pipeline().addLast(handlerName, handler);
                 }
             });
-            if (getHandle == null) {
-                return null;
-            }
 
-            Object serverPlayer = getHandle.invoke(player);
-            if (serverPlayer == null) {
-                return null;
-            }
-
-            Field connectionField = playerConnectionFieldCache.computeIfAbsent(serverPlayer.getClass(), cls ->
-                    findField(cls, "connection", "c", "b", "playerConnection")
-            );
-            if (connectionField == null) {
-                return null;
-            }
-
-            Object listener = connectionField.get(serverPlayer);
-            if (listener == null) {
-                return null;
-            }
-
-            Field netConnectionField = listenerConnectionFieldCache.computeIfAbsent(listener.getClass(), cls ->
-                    findField(cls, "connection", "h", "b", "c")
-            );
-            if (netConnectionField == null) {
-                return null;
-            }
-
-            Object netConnection = netConnectionField.get(listener);
-            if (netConnection == null) {
-                return null;
-            }
-
-            Field channelField = channelFieldCache.computeIfAbsent(netConnection.getClass(), cls ->
-                    findField(cls, "channel", "n", "m")
-            );
-            if (channelField == null) {
-                return null;
-            }
-
-            Object channelObj = channelField.get(netConnection);
-            if (channelObj instanceof Channel channel) {
-                return channel;
-            }
-            return null;
-        } catch (Exception e) {
-            return null;
+            injectedChannels.put(playerId, channel);
+            return true;
+        } catch (Throwable throwable) {
+            DebugLogger.debug(TAG, "Packet injection unavailable for %s: %s",
+                    player.getName(), throwable.getClass().getSimpleName());
+            return false;
         }
     }
 
-    private Field findField(Class<?> type, String... names) {
-        for (String name : names) {
-            try {
-                Field field = type.getField(name);
-                field.setAccessible(true);
-                return field;
-            } catch (NoSuchFieldException ignored) {
+    private void uninject(UUID playerId) {
+        Channel channel = injectedChannels.remove(playerId);
+        if (channel == null) {
+            return;
+        }
+
+        String handlerName = handlerName(playerId);
+        channel.eventLoop().execute(() -> {
+            if (channel.pipeline().get(handlerName) != null) {
+                channel.pipeline().remove(handlerName);
+            }
+        });
+    }
+
+    private void handleInboundPacket(UUID playerId, Object packet) {
+        Player player = Bukkit.getPlayer(playerId);
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+
+        if (packet instanceof ServerboundPlayerActionPacket actionPacket) {
+            if (actionPacket.getAction() == ServerboundPlayerActionPacket.Action.SWAP_ITEM_WITH_OFFHAND) {
+                recordSwap(player, SwapBuffer.SwapType.OFFHAND_SWAP, true);
+            }
+            return;
+        }
+
+        if (packet instanceof ServerboundContainerClickPacket clickPacket) {
+            if (clickPacket.clickType() == net.minecraft.world.inventory.ClickType.SWAP) {
+                recordSwap(player, SwapBuffer.SwapType.NUMBER_KEY, true);
+                return;
+            }
+            if (clickPacket.slotNum() == CONTAINER_OFFHAND_SLOT) {
+                recordSwap(player, SwapBuffer.SwapType.WINDOW_CLICK, true);
             }
         }
-        for (String name : names) {
-            try {
-                Field field = type.getDeclaredField(name);
-                field.setAccessible(true);
-                return field;
-            } catch (NoSuchFieldException ignored) {
-            }
+    }
+
+    private void recordSwap(Player player, SwapBuffer.SwapType swapType, boolean optimisticTotem) {
+        UUID playerId = player.getUniqueId();
+        scheduler.runOnEntityThread(player, () -> {
+            long tick = nmsAccessor.getCurrentTick();
+            boolean hadTotem = optimisticTotem || nmsAccessor.hasTotemInEitherHand(player);
+            swapBuffer.recordSwap(playerId, tick, swapType, hadTotem);
+        });
+    }
+
+    private static Channel resolveChannel(Player player) throws ReflectiveOperationException {
+        Object handle = player.getClass().getMethod("getHandle").invoke(player);
+        Object packetListener = getFieldValue(handle, "connection");
+        if (packetListener == null) {
+            return null;
         }
-        for (Field field : type.getDeclaredFields()) {
-            String lower = field.getName().toLowerCase(Locale.ROOT);
-            for (String target : names) {
-                if (lower.equals(target.toLowerCase(Locale.ROOT))) {
-                    field.setAccessible(true);
-                    return field;
-                }
+
+        Object connection = getFieldValue(packetListener, "connection");
+        if (connection == null) {
+            return null;
+        }
+
+        Field channelField = findFieldByType(connection.getClass(), Channel.class);
+        if (channelField == null) {
+            return null;
+        }
+        channelField.setAccessible(true);
+        return (Channel) channelField.get(connection);
+    }
+
+    private static Object getFieldValue(Object target, String fieldName) throws ReflectiveOperationException {
+        Field field = findField(target.getClass(), fieldName);
+        if (field == null) {
+            return null;
+        }
+        field.setAccessible(true);
+        return field.get(target);
+    }
+
+    private static Field findField(Class<?> type, String fieldName) {
+        Class<?> current = type;
+        while (current != null) {
+            try {
+                return current.getDeclaredField(fieldName);
+            } catch (NoSuchFieldException ignored) {
+                current = current.getSuperclass();
             }
         }
         return null;
     }
 
-    private final class SwapPacketHandler extends ChannelDuplexHandler {
-
-        private final UUID playerId;
-
-        private SwapPacketHandler(UUID playerId) {
-            this.playerId = playerId;
+    private static Field findFieldByType(Class<?> type, Class<?> fieldType) {
+        Class<?> current = type;
+        while (current != null) {
+            Field[] fields = current.getDeclaredFields();
+            for (Field field : fields) {
+                if (fieldType.isAssignableFrom(field.getType())) {
+                    return field;
+                }
+            }
+            current = current.getSuperclass();
         }
-
-        @Override
-        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-            tryHandle(msg);
-            super.channelRead(ctx, msg);
-        }
-
-        private void tryHandle(Object packet) {
-            Class<?> packetClass = packet.getClass();
-            PacketKind kind = packetKindCache.computeIfAbsent(packetClass, this::resolvePacketKind);
-
-            if (kind == PacketKind.PLAYER_ACTION) {
-                Method actionGetter = actionGetterCache.computeIfAbsent(packetClass, this::resolveActionGetter);
-                if (actionGetter == null) {
-                    return;
-                }
-                try {
-                    Object action = actionGetter.invoke(packet);
-                    if (action instanceof Enum<?> actionEnum && "SWAP_ITEM_WITH_OFFHAND".equals(actionEnum.name())) {
-                        enqueueSignal(new SwapSignal(playerId, SwapBuffer.SwapType.OFFHAND_SWAP, -1, -1, nms.getCurrentTick()));
-                    }
-                } catch (Exception ignored) {
-                }
-                return;
-            }
-
-            if (kind != PacketKind.CONTAINER_CLICK) {
-                return;
-            }
-
-            Method clickTypeGetter = clickTypeGetterCache.computeIfAbsent(packetClass, this::resolveClickTypeGetter);
-            if (clickTypeGetter == null) {
-                return;
-            }
-
-            try {
-                Object clickType = clickTypeGetter.invoke(packet);
-                if (!(clickType instanceof Enum<?> clickEnum)) {
-                    return;
-                }
-
-                String click = clickEnum.name();
-                if (!("SWAP".equals(click)
-                        || "QUICK_MOVE".equals(click)
-                        || "PICKUP".equals(click)
-                        || "PICKUP_ALL".equals(click))) {
-                    return;
-                }
-
-                int slot = -1;
-                Method slotGetter = slotGetterCache.computeIfAbsent(packetClass, this::resolveSlotGetter);
-                if (slotGetter != null) {
-                    Object slotObj = slotGetter.invoke(packet);
-                    if (slotObj instanceof Number slotNum) {
-                        slot = slotNum.intValue();
-                    }
-                }
-
-                int button = -1;
-                Method buttonGetter = buttonGetterCache.computeIfAbsent(packetClass, this::resolveButtonGetter);
-                if (buttonGetter != null) {
-                    Object buttonObj = buttonGetter.invoke(packet);
-                    if (buttonObj instanceof Number buttonNum) {
-                        button = buttonNum.intValue();
-                    }
-                }
-
-                if ("SWAP".equals(click)) {
-                    enqueueSignal(new SwapSignal(playerId, SwapBuffer.SwapType.NUMBER_KEY, slot, button, nms.getCurrentTick()));
-                } else {
-                    enqueueSignal(new SwapSignal(playerId, SwapBuffer.SwapType.WINDOW_CLICK, slot, button, nms.getCurrentTick()));
-                }
-            } catch (Exception ignored) {
-            }
-        }
-
-        private PacketKind resolvePacketKind(Class<?> type) {
-            Method actionGetter = resolveActionGetter(type);
-            if (actionGetter != null && actionGetter.getReturnType().isEnum()) {
-                Object[] constants = actionGetter.getReturnType().getEnumConstants();
-                if (containsEnum(constants, "SWAP_ITEM_WITH_OFFHAND")) {
-                    return PacketKind.PLAYER_ACTION;
-                }
-            }
-
-            Method clickTypeGetter = resolveClickTypeGetter(type);
-            if (clickTypeGetter != null && clickTypeGetter.getReturnType().isEnum()) {
-                Object[] constants = clickTypeGetter.getReturnType().getEnumConstants();
-                if (containsEnum(constants, "SWAP")
-                        || containsEnum(constants, "PICKUP")
-                        || containsEnum(constants, "QUICK_MOVE")) {
-                    return PacketKind.CONTAINER_CLICK;
-                }
-            }
-
-            return PacketKind.OTHER;
-        }
-
-        private boolean containsEnum(Object[] constants, String name) {
-            if (constants == null) {
-                return false;
-            }
-            for (Object value : constants) {
-                if (value instanceof Enum<?> enumValue && name.equals(enumValue.name())) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private Method resolveActionGetter(Class<?> type) {
-            try {
-                Method method = type.getMethod("getAction");
-                method.setAccessible(true);
-                return method;
-            } catch (NoSuchMethodException ignored) {
-            }
-            for (Method method : type.getMethods()) {
-                if (method.getParameterCount() == 0 && method.getReturnType().isEnum()) {
-                    String methodName = method.getName().toLowerCase(Locale.ROOT);
-                    if (methodName.contains("action")) {
-                        method.setAccessible(true);
-                        return method;
-                    }
-                }
-            }
-            return null;
-        }
-
-        private Method resolveClickTypeGetter(Class<?> type) {
-            try {
-                Method method = type.getMethod("getClickType");
-                method.setAccessible(true);
-                return method;
-            } catch (NoSuchMethodException ignored) {
-            }
-            for (Method method : type.getMethods()) {
-                if (method.getParameterCount() == 0 && method.getReturnType().isEnum()) {
-                    String methodName = method.getName().toLowerCase(Locale.ROOT);
-                    String returnName = method.getReturnType().getSimpleName().toLowerCase(Locale.ROOT);
-                    if (methodName.contains("click") || returnName.contains("clicktype")) {
-                        method.setAccessible(true);
-                        return method;
-                    }
-                }
-            }
-            return null;
-        }
-
-        private Method resolveSlotGetter(Class<?> type) {
-            try {
-                Method method = type.getMethod("getSlotNum");
-                method.setAccessible(true);
-                return method;
-            } catch (NoSuchMethodException ignored) {
-            }
-            for (Method method : type.getMethods()) {
-                if (method.getParameterCount() == 0
-                        && (method.getReturnType() == int.class || method.getReturnType() == Integer.class)) {
-                    String name = method.getName().toLowerCase(Locale.ROOT);
-                    if (name.contains("slot")) {
-                        method.setAccessible(true);
-                        return method;
-                    }
-                }
-            }
-            return null;
-        }
-
-        private Method resolveButtonGetter(Class<?> type) {
-            try {
-                Method method = type.getMethod("getButtonNum");
-                method.setAccessible(true);
-                return method;
-            } catch (NoSuchMethodException ignored) {
-            }
-            try {
-                Method method = type.getMethod("getButton");
-                method.setAccessible(true);
-                return method;
-            } catch (NoSuchMethodException ignored) {
-            }
-            for (Method method : type.getMethods()) {
-                if (method.getParameterCount() == 0
-                        && (method.getReturnType() == int.class || method.getReturnType() == Integer.class)) {
-                    String name = method.getName().toLowerCase(Locale.ROOT);
-                    if (name.contains("button") || name.contains("mouse")) {
-                        method.setAccessible(true);
-                        return method;
-                    }
-                }
-            }
-            return null;
-        }
+        return null;
     }
 
-    private record InjectionState(UUID playerId, Channel channel, String handlerName) {
+    private static String handlerName(UUID playerId) {
+        return HANDLER_PREFIX + playerId.toString().replace("-", "");
     }
 
-    private record SwapSignal(UUID playerId, SwapBuffer.SwapType type, int slot, int button, long capturedTick) {
-    }
-
-    private enum PacketKind {
-        PLAYER_ACTION,
-        CONTAINER_CLICK,
-        OTHER
+    private static boolean isTotem(ItemStack stack) {
+        return stack != null && stack.getType() == Material.TOTEM_OF_UNDYING;
     }
 }

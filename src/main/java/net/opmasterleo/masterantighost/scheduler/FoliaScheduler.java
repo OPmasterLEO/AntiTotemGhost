@@ -153,8 +153,14 @@ public final class FoliaScheduler {
         String name = Bukkit.getName().toLowerCase(Locale.ROOT);
         String version = Bukkit.getVersion().toLowerCase(Locale.ROOT);
         String fingerprint = name + " " + version;
+        if (fingerprint.contains("canvas")) {
+            return SchedulerBackend.CANVAS;
+        }
         if (fingerprint.contains("paper") || fingerprint.contains("purpur") || fingerprint.contains("pufferfish")) {
             return SchedulerBackend.PAPER;
+        }
+        if (fingerprint.contains("spigot") || fingerprint.contains("craftbukkit")) {
+            return SchedulerBackend.SPIGOT;
         }
         if (fingerprint.contains("arclight")) {
             return SchedulerBackend.ARCLIGHT;
@@ -184,7 +190,9 @@ public final class FoliaScheduler {
 
     public enum SchedulerBackend {
         FOLIA,
+        CANVAS,
         PAPER,
+        SPIGOT,
         ARCLIGHT,
         MOHIST,
         HYBRID,

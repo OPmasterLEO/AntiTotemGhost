@@ -1,16 +1,14 @@
 package net.opmasterleo.masterantighost.combat;
 
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Supplier;
 
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.plugin.Plugin;
 
 import net.opmasterleo.masterantighost.buffer.SwapBuffer;
 import net.opmasterleo.masterantighost.config.PluginConfig;
@@ -22,11 +20,10 @@ public final class CombatManager {
 
     private static final String TAG = "CombatManager";
 
-    private final Plugin plugin;
     private final Supplier<PluginConfig> configSupplier;
     private final NmsAccessor nms;
     private final SwapBuffer swapBuffer;
-    private final ManualResurrection resurrection;
+    private final ManualResurrection manualResurrection;
     private final FoliaScheduler scheduler;
 
     private final LongAdder fastPathPops;
@@ -34,257 +31,170 @@ public final class CombatManager {
     private final LongAdder reconciledDeaths;
     private final LongAdder interceptedHits;
 
-    private final ConcurrentHashMap<UUID, AtomicReference<CombatState>> playerStates;
-    private final ConcurrentHashMap<UUID, DamageCoalescer> damageCoalescers;
-    private final Set<UUID> bypassSet;
-    private final Set<UUID> reconciliationScheduled;
+    private final ConcurrentHashMap<UUID, CombatState> playerStates = new ConcurrentHashMap<>(64);
+    private final ConcurrentHashMap<UUID, DamageCoalescer> lethalDamageBuffer = new ConcurrentHashMap<>(64);
 
-    public CombatManager(Plugin plugin, Supplier<PluginConfig> configSupplier, NmsAccessor nms,
-                         SwapBuffer swapBuffer, ManualResurrection resurrection,
+    public CombatManager(Supplier<PluginConfig> configSupplier,
+                         NmsAccessor nms,
+                         SwapBuffer swapBuffer,
+                         ManualResurrection manualResurrection,
                          FoliaScheduler scheduler,
-                         LongAdder fastPathPops, LongAdder reconciledPops,
-                         LongAdder reconciledDeaths, LongAdder interceptedHits) {
-        this.plugin = plugin;
+                         LongAdder fastPathPops,
+                         LongAdder reconciledPops,
+                         LongAdder reconciledDeaths,
+                         LongAdder interceptedHits) {
         this.configSupplier = configSupplier;
         this.nms = nms;
         this.swapBuffer = swapBuffer;
-        this.resurrection = resurrection;
+        this.manualResurrection = manualResurrection;
         this.scheduler = scheduler;
         this.fastPathPops = fastPathPops;
         this.reconciledPops = reconciledPops;
         this.reconciledDeaths = reconciledDeaths;
         this.interceptedHits = interceptedHits;
-        this.playerStates = new ConcurrentHashMap<>(128);
-        this.damageCoalescers = new ConcurrentHashMap<>(64);
-        this.bypassSet = ConcurrentHashMap.newKeySet(64);
-        this.reconciliationScheduled = ConcurrentHashMap.newKeySet(64);
     }
 
     public void handleLethalDamage(Player player, EntityDamageEvent event) {
         UUID playerId = player.getUniqueId();
         PluginConfig config = configSupplier.get();
 
-        if (bypassSet.remove(playerId)) {
-            DebugLogger.debug(TAG, "Bypass active for %s", player.getName());
+        if (playerStates.get(playerId) == CombatState.PENDING_LETHAL) {
+            event.setCancelled(true);
+            coalesceDamage(playerId, event);
             return;
         }
 
-        AtomicReference<CombatState> stateRef = playerStates.get(playerId);
-        if (stateRef != null && stateRef.get() == CombatState.PENDING_LETHAL) {
-            coalesceDamage(player, event);
-            return;
-        }
-
-        if (config.isEnableFastPath()) {
-            if (resurrection.attemptResurrection(player)) {
-                event.setCancelled(true);
-                fastPathPops.increment();
-                return;
-            }
-        }
-
-        interceptLethalDamage(player, event);
-    }
-
-    public boolean isBypassing(UUID playerId) {
-        return bypassSet.contains(playerId);
-    }
-
-    public CombatState getPlayerState(UUID playerId) {
-        AtomicReference<CombatState> ref = playerStates.get(playerId);
-        return ref != null ? ref.get() : CombatState.NORMAL;
-    }
-
-    private void interceptLethalDamage(Player player, EntityDamageEvent event) {
-        UUID playerId = player.getUniqueId();
-        AtomicReference<CombatState> stateRef = playerStates.computeIfAbsent(
-                playerId, k -> new AtomicReference<>(CombatState.NORMAL)
-        );
-
-        if (!stateRef.compareAndSet(CombatState.NORMAL, CombatState.PENDING_LETHAL)) {
-            if (stateRef.get() == CombatState.PENDING_LETHAL) {
-                coalesceDamage(player, event);
-            }
+        if (config.isEnableFastPath() && nms.hasTotemInEitherHand(player)) {
+            fastPathPops.increment();
             return;
         }
 
         event.setCancelled(true);
         interceptedHits.increment();
 
+        playerStates.put(playerId, CombatState.PENDING_LETHAL);
         Object nmsDamageSource = nms.captureDamageSource(event);
-        long currentTick = nms.getCurrentTick();
-        UUID attackerId = null;
+        DamageContext initialContext = createContext(playerId, event, nmsDamageSource, event.getFinalDamage());
+        lethalDamageBuffer.put(playerId, new DamageCoalescer(initialContext));
 
-        Entity causing = event.getDamageSource().getCausingEntity();
-        if (causing != null) {
-            attackerId = causing.getUniqueId();
-        }
-
-        DamageContext context = new DamageContext(
-                playerId,
-                event.getFinalDamage(),
-                event.getCause(),
-                attackerId,
-                nmsDamageSource,
-                currentTick
-        );
-
-        damageCoalescers.put(playerId, new DamageCoalescer(context));
-        scheduleReconciliation(player, playerId, 0);
-    }
-
-    private void coalesceDamage(Player player, EntityDamageEvent event) {
-        UUID playerId = player.getUniqueId();
-        event.setCancelled(true);
-
-        DamageCoalescer coalescer = damageCoalescers.get(playerId);
-        if (coalescer != null) {
-            Object newSource = nms.captureDamageSource(event);
-            long currentTick = nms.getCurrentTick();
-            coalescer.addDamage(event.getFinalDamage(), newSource, currentTick);
-            DebugLogger.debug(TAG, "Coalesced for %s total=%.2f", player.getName(), coalescer.getTotalDamage());
-        }
-    }
-
-    private void scheduleReconciliation(Player player, UUID playerId, int attempt) {
-        if (attempt == 0 && !reconciliationScheduled.add(playerId)) {
-            return;
-        }
-
-        int delayTicks = configSupplier.get().getReconciliationTicks();
-        scheduler.runOnEntityThreadDelayed(player, () -> performReconciliation(player, playerId, attempt), delayTicks);
-    }
-
-    private void performReconciliation(Player player, UUID playerId, int attempt) {
-        if (!player.isOnline()) {
-            cleanupPlayer(playerId);
-            return;
-        }
-
-        if (player.isDead() || player.getHealth() <= 0.0d) {
-            cleanupPlayer(playerId);
-            AtomicReference<CombatState> staleState = playerStates.get(playerId);
-            if (staleState != null) {
-                staleState.set(CombatState.NORMAL);
-            }
-            return;
-        }
-
-        AtomicReference<CombatState> stateRef = playerStates.get(playerId);
-        if (stateRef == null || stateRef.get() != CombatState.PENDING_LETHAL) {
-            return;
-        }
-
-        PluginConfig config = configSupplier.get();
-
-        long currentTick = nms.getCurrentTick();
-
-        if (nms.hasTotemInEitherHand(player)) {
-            resolveAsResurrection(player, playerId, stateRef);
-            return;
-        }
-
-        int maxAttempts = config.getSwapBufferTicks();
-        if (swapBuffer.hasRecentTotemActivity(playerId, currentTick)) {
-            if (attempt < maxAttempts) {
-                scheduleReconciliation(player, playerId, attempt + 1);
+        long tick = initialContext.tick();
+        scheduler.runOnEntityThread(player, () -> {
+            boolean hasRecent = !config.isSandboxMode() && swapBuffer.hasAnyRecentSwapActivity(playerId, tick);
+            if (!hasRecent) {
+                DamageContext merged = getCurrentContext(playerId, initialContext);
+                applyTrueLethalDamage(player, merged.damage(), merged.nmsDamageSource());
+                lethalDamageBuffer.remove(playerId);
                 return;
             }
-            if (nms.hasTotemInEitherHand(player)) {
-                resolveAsResurrection(player, playerId, stateRef);
-                return;
-            }
-        }
 
-        if (attempt == 0 && swapBuffer.hasAnyRecentSwapActivity(playerId, currentTick) && attempt < maxAttempts) {
-            scheduleReconciliation(player, playerId, attempt + 1);
-            return;
-        }
-
-        if (nms.hasTotemInEitherHand(player)) {
-            resolveAsResurrection(player, playerId, stateRef);
-            return;
-        }
-
-        resolveAsDeath(player, playerId, stateRef);
-    }
-
-    private void resolveAsResurrection(Player player, UUID playerId, AtomicReference<CombatState> stateRef) {
-        if (!stateRef.compareAndSet(CombatState.PENDING_LETHAL, CombatState.RESURRECTED)) {
-            return;
-        }
-
-        if (resurrection.attemptResurrection(player)) {
-            reconciledPops.increment();
-        } else {
-            stateRef.set(CombatState.PENDING_LETHAL);
-            resolveAsDeath(player, playerId, stateRef);
-            return;
-        }
-
-        scheduler.runOnEntityThreadDelayed(player, () -> {
-            stateRef.set(CombatState.NORMAL);
-            cleanupPlayer(playerId);
-        }, 2L);
-    }
-
-    private void resolveAsDeath(Player player, UUID playerId, AtomicReference<CombatState> stateRef) {
-        if (!stateRef.compareAndSet(CombatState.PENDING_LETHAL, CombatState.DEAD)) {
-            return;
-        }
-
-        DamageCoalescer coalescer = damageCoalescers.get(playerId);
-        reconciledDeaths.increment();
-
-        if (coalescer != null) {
-            bypassSet.add(playerId);
-            float totalDamage = (float) coalescer.getTotalDamage();
-            Object damageSource = coalescer.getLatestDamageSource();
-            float lethalDamage = Math.max(totalDamage, (float) player.getHealth() + 1.0f);
-            nms.dealDamageWithSource(player, lethalDamage, damageSource);
-        } else {
-            bypassSet.add(playerId);
-            player.setHealth(0);
-        }
-
-        scheduler.runOnEntityThreadDelayed(player, () -> {
-            stateRef.set(CombatState.NORMAL);
-            cleanupPlayer(playerId);
-        }, 2L);
-    }
-
-    public void cleanupPlayer(UUID playerId) {
-        damageCoalescers.remove(playerId);
-        bypassSet.remove(playerId);
-        reconciliationScheduled.remove(playerId);
-    }
-
-    public void cleanupStaleEntries() {
-        playerStates.entrySet().removeIf(entry -> {
-            UUID playerId = entry.getKey();
-            CombatState state = entry.getValue().get();
-            if (state == CombatState.NORMAL) {
-                var player = plugin.getServer().getPlayer(playerId);
-                return player == null || !player.isOnline();
-            }
-            return false;
+            scheduler.runOnEntityThreadDelayed(player, () -> {
+                Player target = org.bukkit.Bukkit.getPlayer(playerId);
+                if (target != null && target.isOnline()) {
+                    reconcileLethalDamage(target);
+                }
+            }, config.getReconciliationTicks());
         });
     }
 
-    public void onPlayerQuit(UUID playerId) {
-        AtomicReference<CombatState> stateRef = playerStates.get(playerId);
-        if (stateRef != null) {
-            stateRef.set(CombatState.NORMAL);
+    private void reconcileLethalDamage(Player player) {
+        UUID playerId = player.getUniqueId();
+        try {
+            DamageContext context = getCurrentContext(playerId, null);
+            if (context == null) {
+                return;
+            }
+
+            boolean validSwap = swapBuffer.hasRecentTotemActivity(playerId, nms.getCurrentTick());
+            if (configSupplier.get().isSandboxMode()) {
+                validSwap = true;
+            }
+
+            if (validSwap && manualResurrection.attemptResurrection(player)) {
+                reconciledPops.increment();
+                playerStates.put(playerId, CombatState.RESURRECTED);
+                DebugLogger.debug(TAG, "Reconciled POP for %s after latent swap", player.getName());
+                return;
+            }
+
+            reconciledDeaths.increment();
+            DebugLogger.debug(TAG, "Reconciled DEATH for %s (no latent totem)", player.getName());
+            applyTrueLethalDamage(player, context.damage(), context.nmsDamageSource());
+        } finally {
+            lethalDamageBuffer.remove(playerId);
+            CombatState state = playerStates.get(playerId);
+            if (state == CombatState.PENDING_LETHAL || state == CombatState.RESURRECTED) {
+                playerStates.put(playerId, CombatState.NORMAL);
+            }
         }
-        cleanupPlayer(playerId);
+    }
+
+    private void applyTrueLethalDamage(Player player, double damage, Object nmsDamageSource) {
+        UUID playerId = player.getUniqueId();
+        playerStates.put(playerId, CombatState.DEAD);
+        nms.dealDamageWithSource(player, (float) damage, nmsDamageSource);
+        playerStates.put(playerId, CombatState.NORMAL);
+    }
+
+    public boolean isBypassing(UUID playerId) {
+        CombatState state = playerStates.get(playerId);
+        return state == CombatState.PENDING_LETHAL || state == CombatState.DEAD;
+    }
+
+    public void onPlayerQuit(UUID playerId) {
+        playerStates.remove(playerId);
+        lethalDamageBuffer.remove(playerId);
         swapBuffer.clearPlayer(playerId);
+    }
+
+    public void cleanupStaleEntries() {
+        // Entries are naturally removed on quit and on reconciliation completion.
     }
 
     public void shutdown() {
         playerStates.clear();
-        damageCoalescers.clear();
-        bypassSet.clear();
-        reconciliationScheduled.clear();
-        DebugLogger.info("CombatManager shutdown");
+        lethalDamageBuffer.clear();
+    }
+
+    private void coalesceDamage(UUID playerId, EntityDamageEvent event) {
+        double damage = event.getFinalDamage();
+        if (!Double.isFinite(damage) || damage <= 0.0d) {
+            return;
+        }
+
+        Object nmsDamageSource = nms.captureDamageSource(event);
+        long tick = nms.getCurrentTick();
+
+        lethalDamageBuffer.compute(playerId, (id, current) -> {
+            if (current == null) {
+                DamageContext fallback = createContext(id, event, nmsDamageSource, damage);
+                return new DamageCoalescer(fallback);
+            }
+            current.addDamage(damage, nmsDamageSource, tick);
+            return current;
+        });
+    }
+
+    private DamageContext createContext(UUID playerId, EntityDamageEvent event, Object nmsDamageSource, double damage) {
+        Entity attacker = null;
+        if (event instanceof EntityDamageByEntityEvent byEntity) {
+            attacker = byEntity.getDamager();
+        }
+
+        return new DamageContext(
+                playerId,
+                damage,
+                event.getCause(),
+                attacker,
+                nmsDamageSource,
+                nms.getCurrentTick()
+        );
+    }
+
+    private DamageContext getCurrentContext(UUID playerId, DamageContext fallback) {
+        DamageCoalescer coalescer = lethalDamageBuffer.get(playerId);
+        if (coalescer == null) {
+            return fallback;
+        }
+        return coalescer.getCoalescedDamage();
     }
 }

@@ -1,33 +1,39 @@
 package net.opmasterleo.masterantighost.combat;
 
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class DamageCoalescer {
 
-    private final AtomicReference<DamageContext> coalescedDamage;
+    private final AtomicReference<DamageContext> context;
 
     public DamageCoalescer(DamageContext initialContext) {
-        this.coalescedDamage = new AtomicReference<>(initialContext);
+        this.context = new AtomicReference<>(Objects.requireNonNull(initialContext, "initialContext"));
     }
 
-    public void addDamage(double additionalDamage, Object nmsDamageSource, long tickStamp) {
-        DamageContext current;
-        DamageContext updated;
-        do {
-            current = coalescedDamage.get();
-            updated = current.withAddedDamage(additionalDamage, nmsDamageSource, tickStamp);
-        } while (!coalescedDamage.compareAndSet(current, updated));
-    }
+    public void addDamage(double additionalDamage, Object latestDamageSource, long tick) {
+        if (!Double.isFinite(additionalDamage) || additionalDamage <= 0.0d) {
+            return;
+        }
 
-    public DamageContext getCoalescedDamage() {
-        return coalescedDamage.get();
+        while (true) {
+            DamageContext current = context.get();
+            DamageContext updated = current.withAdditionalDamage(additionalDamage, latestDamageSource, tick);
+            if (context.compareAndSet(current, updated)) {
+                return;
+            }
+        }
     }
 
     public double getTotalDamage() {
-        return coalescedDamage.get().getDamage();
+        return context.get().damage();
     }
 
     public Object getLatestDamageSource() {
-        return coalescedDamage.get().getNmsDamageSource();
+        return context.get().nmsDamageSource();
+    }
+
+    public DamageContext getCoalescedDamage() {
+        return context.get();
     }
 }

@@ -13,7 +13,7 @@ import net.opmasterleo.masterantighost.debug.DebugLogger;
 import net.opmasterleo.masterantighost.listener.CommandListener;
 import net.opmasterleo.masterantighost.listener.DamageListener;
 import net.opmasterleo.masterantighost.nms.NmsAccessor;
-import net.opmasterleo.masterantighost.nms.NmsAccessorUniversal;
+import net.opmasterleo.masterantighost.nms.NmsAccessorDirect;
 import net.opmasterleo.masterantighost.nms.PacketSwapInjector;
 import net.opmasterleo.masterantighost.scheduler.FoliaScheduler;
 public final class MasterAntiGhost extends JavaPlugin {
@@ -38,6 +38,7 @@ public final class MasterAntiGhost extends JavaPlugin {
         this.pluginConfig = new PluginConfig(getConfig());
         DebugLogger.init(getLogger(), pluginConfig.isDebugMode());
         DebugLogger.info("Initializing MasterAntiGhost v" + getDescription().getVersion());
+        DebugLogger.info("Server: " + Bukkit.getName() + " | Bukkit: " + Bukkit.getVersion());
         DebugLogger.info("Folia detected: " + FoliaScheduler.isFolia());
 
         this.nmsAccessor = createNmsAccessor();
@@ -54,16 +55,8 @@ public final class MasterAntiGhost extends JavaPlugin {
         DebugLogger.info("Scheduler backend: " + foliaScheduler.getBackend());
         this.swapBuffer = new SwapBuffer(pluginConfig.getSwapBufferTicks());
         this.manualResurrection = new ManualResurrection(nmsAccessor);
-        this.packetSwapInjector = new PacketSwapInjector(
-            this,
-            swapBuffer,
-            nmsAccessor,
-            foliaScheduler,
-            id -> combatManager.onPlayerQuit(id)
-        );
 
         this.combatManager = new CombatManager(
-                this,
                 this::getPluginConfig,
                 nmsAccessor,
                 swapBuffer,
@@ -74,6 +67,14 @@ public final class MasterAntiGhost extends JavaPlugin {
                 reconciledDeaths,
                 interceptedHits
         );
+
+            this.packetSwapInjector = new PacketSwapInjector(
+                this,
+                swapBuffer,
+                nmsAccessor,
+                foliaScheduler,
+                id -> combatManager.onPlayerQuit(id)
+            );
 
         Bukkit.getPluginManager().registerEvents(new DamageListener(combatManager), this);
         packetSwapInjector.start();
@@ -122,7 +123,8 @@ public final class MasterAntiGhost extends JavaPlugin {
     private NmsAccessor createNmsAccessor() {
         String version = Bukkit.getMinecraftVersion();
         DebugLogger.info("Detected Minecraft version: " + version);
-        return new NmsAccessorUniversal(version);
+        DebugLogger.info("Target compatibility profile: 1.21.0 - 1.21.6");
+        return new NmsAccessorDirect(version);
     }
 
     public PluginConfig getPluginConfig() {

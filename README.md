@@ -6,7 +6,7 @@ Eliminates near-instant totem ghosting by intercepting lethal damage at the NMS 
 
 **Author:** OPmasterLEO  
 **Version:** 1.0.0  
-**Target:** Paper/Folia 1.20.4+  
+**Target:** Minecraft 1.21.0 - 1.21.6 (Paper/Folia/Spigot and compatible forks)  
 **Java:** 17+
 
 ---
