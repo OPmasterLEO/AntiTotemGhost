@@ -25,7 +25,7 @@ public final class NmsAccessorDirect implements NmsAccessor {
     private final String versionTag;
     private final boolean available;
 
-    public NmsAccessorDirect(String versionTag) {
+    public NmsAccessor(String versionTag) {
         this.versionTag = versionTag;
         this.available = isSupportedVersion(versionTag) && hasRequiredRuntimeSymbols();
     }

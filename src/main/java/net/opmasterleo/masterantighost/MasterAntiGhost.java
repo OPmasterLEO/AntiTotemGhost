@@ -124,7 +124,7 @@ public final class MasterAntiGhost extends JavaPlugin {
         String version = Bukkit.getMinecraftVersion();
         DebugLogger.info("Detected Minecraft version: " + version);
         DebugLogger.info("Target compatibility profile: 1.21.0 - 1.21.6");
-        return new NmsAccessorDirect(version);
+        return new NmsAccessor(version);
     }
 
     public PluginConfig getPluginConfig() {
