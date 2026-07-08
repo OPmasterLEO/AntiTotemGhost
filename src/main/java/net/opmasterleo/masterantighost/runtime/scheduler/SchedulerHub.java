@@ -14,6 +14,18 @@ public final class SchedulerHub {
 
     private final Plugin plugin;
     private final ExecutorService workerPool;
+    private static final boolean FOLIA;
+
+    static {
+        boolean folia;
+        try {
+            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
+            folia = true;
+        } catch (ClassNotFoundException e) {
+            folia = false;
+        }
+        FOLIA = folia;
+    }
 
     public SchedulerHub(Plugin plugin) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
@@ -41,14 +53,34 @@ public final class SchedulerHub {
     }
 
     public void runEntity(Entity entity, Runnable task) {
-        entity.getScheduler().run(plugin, scheduledTask -> safe(task).run(), () -> {
-        });
+        if (FOLIA) {
+            entity.getScheduler().run(plugin, scheduledTask -> safe(task).run(), () -> {
+            });
+        } else {
+            Bukkit.getScheduler().runTask(plugin, safe(task));
+        }
     }
 
     public void runEntityLater(Entity entity, Runnable task, long delayTicks) {
         long delay = Math.max(0L, delayTicks);
-        entity.getScheduler().runDelayed(plugin, scheduledTask -> safe(task).run(), () -> {
-        }, delay);
+        if (FOLIA) {
+            entity.getScheduler().runDelayed(plugin, scheduledTask -> safe(task).run(), () -> {
+            }, delay);
+        } else {
+            Bukkit.getScheduler().runTaskLater(plugin, safe(task), delay);
+        }
+    }
+
+    public SchedulerHandle scheduleRepeatingMain(Runnable task, long initialDelayTicks, long periodTicks) {
+        long initial = Math.max(0L, initialDelayTicks);
+        long period = Math.max(1L, periodTicks);
+        if (FOLIA) {
+            var scheduled = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin,
+                    scheduledTask -> safe(task).run(), initial, period);
+            return scheduled::cancel;
+        }
+        var bukkitTask = Bukkit.getScheduler().runTaskTimer(plugin, safe(task), initial, period);
+        return bukkitTask::cancel;
     }
 
     public void shutdown() {
@@ -80,6 +112,10 @@ public final class SchedulerHub {
             t.setDaemon(true);
             return t;
         }
+    }
+
+    public interface SchedulerHandle {
+        void cancel();
     }
 }
 

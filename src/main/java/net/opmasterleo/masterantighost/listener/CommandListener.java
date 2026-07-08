@@ -15,26 +15,30 @@ import org.bukkit.command.TabCompleter;
 import net.opmasterleo.masterantighost.MasterAntiGhost;
 import net.opmasterleo.masterantighost.config.PluginConfig;
 import net.opmasterleo.masterantighost.debug.DebugLogger;
+import net.opmasterleo.masterantighost.version.CapabilityReport;
 
 public final class CommandListener implements CommandExecutor, TabCompleter {
 
     private static final String PREFIX = ChatColor.GOLD + "[MasterAntiGhost] " + ChatColor.RESET;
-    private static final List<String> SUBCOMMANDS = Arrays.asList("reload", "debug", "stats");
+    private static final List<String> SUBCOMMANDS = Arrays.asList("reload", "debug", "stats", "compat");
 
     private final MasterAntiGhost plugin;
     private final LongAdder fastPathPops;
     private final LongAdder reconciledPops;
     private final LongAdder reconciledDeaths;
     private final LongAdder interceptedHits;
+    private final CapabilityReport capabilityReport;
 
     public CommandListener(MasterAntiGhost plugin,
                            LongAdder fastPathPops, LongAdder reconciledPops,
-                           LongAdder reconciledDeaths, LongAdder interceptedHits) {
+                           LongAdder reconciledDeaths, LongAdder interceptedHits,
+                           CapabilityReport capabilityReport) {
         this.plugin = plugin;
         this.fastPathPops = fastPathPops;
         this.reconciledPops = reconciledPops;
         this.reconciledDeaths = reconciledDeaths;
         this.interceptedHits = interceptedHits;
+        this.capabilityReport = capabilityReport;
     }
 
     @Override
@@ -74,6 +78,25 @@ public final class CommandListener implements CommandExecutor, TabCompleter {
                         (config.isEnableFastPath() ? ChatColor.GREEN + "enabled" : ChatColor.RED + "disabled"));
                 sender.sendMessage(PREFIX + "Debug mode: " +
                         (DebugLogger.isEnabled() ? ChatColor.GREEN + "enabled" : ChatColor.RED + "disabled"));
+                sender.sendMessage(PREFIX + ChatColor.AQUA + "=== Compatibility ===");
+                if (capabilityReport != null) {
+                    sender.sendMessage(PREFIX + "Minecraft version: " + ChatColor.WHITE + capabilityReport.minecraftVersion());
+                    sender.sendMessage(PREFIX + "NMS available: " + ChatColor.WHITE + capabilityReport.nmsAvailable());
+                    sender.sendMessage(PREFIX + "NMS tag: " + ChatColor.WHITE + capabilityReport.nmsTag());
+                    sender.sendMessage(PREFIX + "Folia detected: " + ChatColor.WHITE + capabilityReport.foliaDetected());
+                }
+            }
+            case "compat" -> {
+                sender.sendMessage(PREFIX + ChatColor.AQUA + "=== Compatibility Report ===");
+                if (capabilityReport == null) {
+                    sender.sendMessage(PREFIX + ChatColor.RED + "No capability report available.");
+                } else {
+                    sender.sendMessage(PREFIX + "Bukkit version: " + ChatColor.WHITE + capabilityReport.bukkitVersion());
+                    sender.sendMessage(PREFIX + "Minecraft version: " + ChatColor.WHITE + capabilityReport.minecraftVersion());
+                    sender.sendMessage(PREFIX + "Folia detected: " + ChatColor.WHITE + capabilityReport.foliaDetected());
+                    sender.sendMessage(PREFIX + "NMS available: " + ChatColor.WHITE + capabilityReport.nmsAvailable());
+                    sender.sendMessage(PREFIX + "NMS tag: " + ChatColor.WHITE + capabilityReport.nmsTag());
+                }
             }
             default -> sendHelp(sender, label);
         }
@@ -86,6 +109,7 @@ public final class CommandListener implements CommandExecutor, TabCompleter {
         sender.sendMessage(PREFIX + ChatColor.GRAY + "/" + label + " reload " + ChatColor.WHITE + "— Reload config");
         sender.sendMessage(PREFIX + ChatColor.GRAY + "/" + label + " debug " + ChatColor.WHITE + "— Toggle debug");
         sender.sendMessage(PREFIX + ChatColor.GRAY + "/" + label + " stats " + ChatColor.WHITE + "— Show statistics");
+        sender.sendMessage(PREFIX + ChatColor.GRAY + "/" + label + " compat " + ChatColor.WHITE + "— Show compatibility");
     }
 
     @Override

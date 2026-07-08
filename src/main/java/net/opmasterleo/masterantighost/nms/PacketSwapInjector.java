@@ -1,7 +1,6 @@
 package net.opmasterleo.masterantighost.nms;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,6 +29,7 @@ import io.netty.channel.ChannelHandlerContext;
 import net.opmasterleo.masterantighost.buffer.SwapBuffer;
 import net.opmasterleo.masterantighost.debug.DebugLogger;
 import net.opmasterleo.masterantighost.scheduler.FoliaScheduler;
+import net.opmasterleo.masterantighost.version.PacketSchemaResolver;
 
 public final class PacketSwapInjector implements Listener {
 
@@ -42,6 +42,7 @@ public final class PacketSwapInjector implements Listener {
     private final SwapBuffer swapBuffer;
     private final NmsAccessor nmsAccessor;
     private final FoliaScheduler scheduler;
+    private final PacketSchemaResolver packetSchemaResolver;
     private final Consumer<UUID> onPlayerQuit;
     private final Map<UUID, Channel> injectedChannels = new ConcurrentHashMap<>();
 
@@ -51,11 +52,13 @@ public final class PacketSwapInjector implements Listener {
                               SwapBuffer swapBuffer,
                               NmsAccessor nmsAccessor,
                               FoliaScheduler scheduler,
+                              PacketSchemaResolver packetSchemaResolver,
                               Consumer<UUID> onPlayerQuit) {
         this.plugin = plugin;
         this.swapBuffer = swapBuffer;
         this.nmsAccessor = nmsAccessor;
         this.scheduler = scheduler;
+        this.packetSchemaResolver = packetSchemaResolver;
         this.onPlayerQuit = onPlayerQuit;
     }
 
@@ -215,29 +218,11 @@ public final class PacketSwapInjector implements Listener {
             return;
         }
 
-        String packetName = packet.getClass().getName();
-        if (packetName.endsWith("ServerboundPlayerActionPacket") || packetName.endsWith("PacketPlayInBlockDig")) {
-            Object action = invokeNoArgs(packet, "getAction");
-            if (action != null && "SWAP_ITEM_WITH_OFFHAND".equals(action.toString())) {
-                recordSwap(player, SwapBuffer.SwapType.OFFHAND_SWAP, true);
-            }
+        SwapBuffer.SwapType swapType = packetSchemaResolver.resolveSwapType(packet);
+        if (swapType == null) {
             return;
         }
-
-        if (packetName.endsWith("ServerboundContainerClickPacket") || packetName.endsWith("PacketPlayInWindowClick")) {
-            Object clickType = invokeNoArgs(packet, "clickType");
-            if (clickType == null) {
-                clickType = invokeNoArgs(packet, "getClickType");
-            }
-            if (clickType != null && "SWAP".equals(clickType.toString())) {
-                recordSwap(player, SwapBuffer.SwapType.NUMBER_KEY, true);
-                return;
-            }
-            Integer slotNum = getIntValue(packet, "slotNum", "getSlotNum");
-            if (slotNum != null && slotNum == CONTAINER_OFFHAND_SLOT) {
-                recordSwap(player, SwapBuffer.SwapType.WINDOW_CLICK, true);
-            }
-        }
+        recordSwap(player, swapType, nmsAccessor.hasTotemInEitherHand(player));
     }
 
     private void recordSwap(Player player, SwapBuffer.SwapType swapType, boolean optimisticTotem) {
@@ -312,26 +297,6 @@ public final class PacketSwapInjector implements Listener {
         return stack != null && stack.getType() == Material.TOTEM_OF_UNDYING;
     }
 
-    private static Object invokeNoArgs(Object target, String methodName) {
-        try {
-            Method method = target.getClass().getMethod(methodName);
-            method.setAccessible(true);
-            return method.invoke(target);
-        } catch (ReflectiveOperationException ignored) {
-            return null;
-        }
-    }
-
-    private static Integer getIntValue(Object target, String... methods) {
-        for (String methodName : methods) {
-            Object value = invokeNoArgs(target, methodName);
-            if (value instanceof Number number) {
-                return number.intValue();
-            }
-        }
-        return null;
-    }
-
     private static boolean likelyHasTotem(InventoryClickEvent event, Player player) {
         if (isTotem(event.getCurrentItem()) || isTotem(event.getCursor())) {
             return true;
@@ -345,4 +310,5 @@ public final class PacketSwapInjector implements Listener {
         }
         return false;
     }
+
 }

@@ -17,7 +17,7 @@ public final class NmsAccessorDirect implements NmsAccessor {
     private static final Pattern VERSION_PATTERN = Pattern.compile("^(\\d+)\\.(\\d+)(?:\\.(\\d+))?.*");
     private static final int SUPPORTED_MAJOR = 1;
     private static final int SUPPORTED_MINOR_MIN = 20;
-    private static final int SUPPORTED_MINOR_MAX = 21;
+    private static final int SUPPORTED_MINOR_MAX = 60;
 
     private static final String CLASS_CRAFT_DAMAGE_SOURCE = "org.bukkit.craftbukkit.damage.CraftDamageSource";
     private static final String CLASS_MINECRAFT_SERVER = "net.minecraft.server.MinecraftServer";

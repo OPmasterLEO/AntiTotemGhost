@@ -2,6 +2,7 @@ package net.opmasterleo.masterantighost.runtime;
 
 import java.util.Objects;
 
+import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.Plugin;
 
 import net.opmasterleo.masterantighost.buffer.SwapBuffer;
@@ -9,13 +10,16 @@ import net.opmasterleo.masterantighost.combat.CombatManager;
 import net.opmasterleo.masterantighost.combat.ManualResurrection;
 import net.opmasterleo.masterantighost.config.PluginConfig;
 import net.opmasterleo.masterantighost.debug.DebugLogger;
+import net.opmasterleo.masterantighost.listener.CommandListener;
 import net.opmasterleo.masterantighost.listener.DamageListener;
 import net.opmasterleo.masterantighost.nms.NmsAccessor;
-import net.opmasterleo.masterantighost.nms.NmsAccessorDirect;
 import net.opmasterleo.masterantighost.nms.PacketSwapInjector;
 import net.opmasterleo.masterantighost.runtime.scheduler.SchedulerHub;
 import net.opmasterleo.masterantighost.runtime.task.TaskSupervisor;
 import net.opmasterleo.masterantighost.scheduler.FoliaScheduler;
+import net.opmasterleo.masterantighost.version.CapabilityReport;
+import net.opmasterleo.masterantighost.version.VersionBridge;
+import net.opmasterleo.masterantighost.version.VersionBridgeFactory;
 
 public final class ServiceRegistry {
 
@@ -24,12 +28,19 @@ public final class ServiceRegistry {
     private final TaskSupervisor taskSupervisor;
 
     private PluginConfig pluginConfig;
+    private VersionBridge versionBridge;
     private NmsAccessor nmsAccessor;
     private FoliaScheduler foliaScheduler;
     private SwapBuffer swapBuffer;
     private ManualResurrection manualResurrection;
     private CombatManager combatManager;
     private PacketSwapInjector packetSwapInjector;
+    private DamageListener damageListener;
+
+    private java.util.concurrent.atomic.LongAdder fastPathPops;
+    private java.util.concurrent.atomic.LongAdder reconciledPops;
+    private java.util.concurrent.atomic.LongAdder reconciledDeaths;
+    private java.util.concurrent.atomic.LongAdder interceptedHits;
 
     public ServiceRegistry(Plugin plugin, SchedulerHub schedulerHub, TaskSupervisor taskSupervisor) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
@@ -41,7 +52,8 @@ public final class ServiceRegistry {
         this.plugin.saveDefaultConfig();
         this.pluginConfig = new PluginConfig(plugin.getConfig());
         DebugLogger.init(plugin.getLogger(), pluginConfig.isDebugMode());
-        this.nmsAccessor = new NmsAccessorDirect(org.bukkit.Bukkit.getMinecraftVersion());
+        this.versionBridge = VersionBridgeFactory.create();
+        this.nmsAccessor = versionBridge.nmsAccessor();
         if (!nmsAccessor.isAvailable()) {
             plugin.getLogger().severe("NMS accessor not available, version: " + org.bukkit.Bukkit.getMinecraftVersion());
             return false;
@@ -53,10 +65,10 @@ public final class ServiceRegistry {
         this.foliaScheduler = new FoliaScheduler(plugin);
         this.swapBuffer = new SwapBuffer(pluginConfig.getSwapBufferTicks());
         this.manualResurrection = new ManualResurrection(nmsAccessor);
-        java.util.concurrent.atomic.LongAdder fastPathPops = new java.util.concurrent.atomic.LongAdder();
-        java.util.concurrent.atomic.LongAdder reconciledPops = new java.util.concurrent.atomic.LongAdder();
-        java.util.concurrent.atomic.LongAdder reconciledDeaths = new java.util.concurrent.atomic.LongAdder();
-        java.util.concurrent.atomic.LongAdder interceptedHits = new java.util.concurrent.atomic.LongAdder();
+        this.fastPathPops = new java.util.concurrent.atomic.LongAdder();
+        this.reconciledPops = new java.util.concurrent.atomic.LongAdder();
+        this.reconciledDeaths = new java.util.concurrent.atomic.LongAdder();
+        this.interceptedHits = new java.util.concurrent.atomic.LongAdder();
         this.combatManager = new CombatManager(
                 () -> pluginConfig,
                 nmsAccessor,
@@ -73,16 +85,32 @@ public final class ServiceRegistry {
                 swapBuffer,
                 nmsAccessor,
                 foliaScheduler,
+                versionBridge.packetSchemaResolver(),
                 id -> combatManager.onPlayerQuit(id)
         );
-        org.bukkit.Bukkit.getPluginManager().registerEvents(new DamageListener(combatManager), plugin);
+        this.damageListener = new DamageListener(combatManager);
+        org.bukkit.Bukkit.getPluginManager().registerEvents(damageListener, plugin);
         packetSwapInjector.start();
+
+        CapabilityReport report = versionBridge.capabilityReport();
+        var command = ((org.bukkit.plugin.java.JavaPlugin) plugin).getCommand("masterantighost");
+        if (command != null) {
+            var cmdListener = new CommandListener((net.opmasterleo.masterantighost.MasterAntiGhost) plugin,
+                    fastPathPops, reconciledPops, reconciledDeaths, interceptedHits,
+                    report);
+            command.setExecutor(cmdListener);
+            command.setTabCompleter(cmdListener);
+        }
     }
 
     public void beginDrain() {
     }
 
     public void stop() {
+        if (damageListener != null) {
+            HandlerList.unregisterAll(damageListener);
+            damageListener = null;
+        }
         if (combatManager != null) {
             combatManager.shutdown();
         }
@@ -117,6 +145,10 @@ public final class ServiceRegistry {
 
     public SwapBuffer swapBuffer() {
         return swapBuffer;
+    }
+
+    public CapabilityReport capabilityReport() {
+        return versionBridge == null ? null : versionBridge.capabilityReport();
     }
 }
 

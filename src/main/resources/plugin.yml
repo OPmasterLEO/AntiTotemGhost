@@ -9,7 +9,7 @@ folia-supported: true
 commands:
   masterantighost:
     description: MasterAntiGhost admin command
-    usage: /masterantighost [reload|debug|stats]
+    usage: /masterantighost [reload|debug|stats|compat]
     permission: masterantighost.admin
     aliases: [mag, antighost]
 
