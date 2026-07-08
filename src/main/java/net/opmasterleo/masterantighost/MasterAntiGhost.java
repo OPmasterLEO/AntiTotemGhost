@@ -2,7 +2,7 @@ package net.opmasterleo.masterantighost;
 
 import org.bukkit.plugin.java.JavaPlugin;
 
-import net.opmasterleo.masterantighost.combat.CombatManager;
+import net.opmasterleo.masterantighost.combat.CombatEngine;
 import net.opmasterleo.masterantighost.config.PluginConfig;
 import net.opmasterleo.masterantighost.runtime.EngineRuntime;
 import net.opmasterleo.masterantighost.runtime.ServiceRegistry;
@@ -42,10 +42,10 @@ public final class MasterAntiGhost extends JavaPlugin {
         return engine.services().pluginConfig();
     }
 
-    public CombatManager getCombatManager() {
+    public CombatEngine getCombatEngine() {
         if (engine == null) {
             return null;
         }
-        return engine.services().combatManager();
+        return engine.services().combatEngine();
     }
 }

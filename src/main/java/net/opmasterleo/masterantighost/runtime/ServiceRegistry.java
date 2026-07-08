@@ -6,7 +6,7 @@ import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.Plugin;
 
 import net.opmasterleo.masterantighost.buffer.SwapBuffer;
-import net.opmasterleo.masterantighost.combat.CombatManager;
+import net.opmasterleo.masterantighost.combat.CombatEngine;
 import net.opmasterleo.masterantighost.combat.ManualResurrection;
 import net.opmasterleo.masterantighost.config.PluginConfig;
 import net.opmasterleo.masterantighost.debug.DebugLogger;
@@ -33,9 +33,10 @@ public final class ServiceRegistry {
     private FoliaScheduler foliaScheduler;
     private SwapBuffer swapBuffer;
     private ManualResurrection manualResurrection;
-    private CombatManager combatManager;
+    private CombatEngine combatEngine;
     private PacketSwapInjector packetSwapInjector;
     private DamageListener damageListener;
+    private SchedulerHub.SchedulerHandle maintenanceHandle;
 
     private java.util.concurrent.atomic.LongAdder fastPathPops;
     private java.util.concurrent.atomic.LongAdder reconciledPops;
@@ -69,12 +70,12 @@ public final class ServiceRegistry {
         this.reconciledPops = new java.util.concurrent.atomic.LongAdder();
         this.reconciledDeaths = new java.util.concurrent.atomic.LongAdder();
         this.interceptedHits = new java.util.concurrent.atomic.LongAdder();
-        this.combatManager = new CombatManager(
+        this.combatEngine = new CombatEngine(
                 () -> pluginConfig,
                 nmsAccessor,
                 swapBuffer,
                 manualResurrection,
-                foliaScheduler,
+                schedulerHub,
                 fastPathPops,
                 reconciledPops,
                 reconciledDeaths,
@@ -86,9 +87,9 @@ public final class ServiceRegistry {
                 nmsAccessor,
                 foliaScheduler,
                 versionBridge.packetSchemaResolver(),
-                id -> combatManager.onPlayerQuit(id)
+                id -> combatEngine.onPlayerQuit(id)
         );
-        this.damageListener = new DamageListener(combatManager);
+        this.damageListener = new DamageListener(combatEngine);
         org.bukkit.Bukkit.getPluginManager().registerEvents(damageListener, plugin);
         packetSwapInjector.start();
 
@@ -101,6 +102,11 @@ public final class ServiceRegistry {
             command.setExecutor(cmdListener);
             command.setTabCompleter(cmdListener);
         }
+
+        this.maintenanceHandle = schedulerHub.scheduleRepeatingMain(() -> {
+            swapBuffer.cleanupExpired(nmsAccessor.getCurrentTick());
+            combatEngine.cleanupStaleEntries();
+        }, 100L, 100L);
     }
 
     public void beginDrain() {
@@ -111,16 +117,22 @@ public final class ServiceRegistry {
             HandlerList.unregisterAll(damageListener);
             damageListener = null;
         }
-        if (combatManager != null) {
-            combatManager.shutdown();
+        if (maintenanceHandle != null) {
+            maintenanceHandle.cancel();
+            maintenanceHandle = null;
+        }
+        if (combatEngine != null) {
+            combatEngine.shutdown();
+            combatEngine = null;
         }
         if (packetSwapInjector != null) {
             packetSwapInjector.shutdown();
+            packetSwapInjector = null;
         }
     }
 
-    public CombatManager combatManager() {
-        return combatManager;
+    public CombatEngine combatEngine() {
+        return combatEngine;
     }
 
     public PluginConfig pluginConfig() {
