@@ -28,15 +28,12 @@ public final class DamageListener implements Listener {
             return;
         }
 
-        double health = player.getHealth();
+        double effectiveHealth = player.getHealth() + player.getAbsorptionAmount();
         double finalDamage = event.getFinalDamage();
         if (!Double.isFinite(finalDamage) || finalDamage <= 0.0d) {
             return;
         }
-        double absorptionHearts = player.getAbsorptionAmount();
-        double effectiveDamage = Math.max(0.0d, finalDamage - absorptionHearts);
-
-        if (effectiveDamage < health) {
+        if (finalDamage < effectiveHealth) {
             return;
         }
 

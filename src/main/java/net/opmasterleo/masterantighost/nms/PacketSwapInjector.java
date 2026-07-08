@@ -1,6 +1,7 @@
 package net.opmasterleo.masterantighost.nms;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -20,13 +21,12 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.plugin.Plugin;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
-import net.minecraft.network.protocol.game.ServerboundContainerClickPacket;
-import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.opmasterleo.masterantighost.buffer.SwapBuffer;
 import net.opmasterleo.masterantighost.debug.DebugLogger;
 import net.opmasterleo.masterantighost.scheduler.FoliaScheduler;
@@ -120,18 +120,18 @@ public final class PacketSwapInjector implements Listener {
         InventoryAction action = event.getAction();
 
         if (clickType == ClickType.SWAP_OFFHAND) {
-            recordSwap(player, SwapBuffer.SwapType.OFFHAND_SWAP, true);
+            recordSwap(player, SwapBuffer.SwapType.OFFHAND_SWAP, likelyHasTotem(event, player));
             return;
         }
 
         if (clickType == ClickType.NUMBER_KEY
                 || action == InventoryAction.HOTBAR_SWAP) {
-            recordSwap(player, SwapBuffer.SwapType.NUMBER_KEY, true);
+            recordSwap(player, SwapBuffer.SwapType.NUMBER_KEY, likelyHasTotem(event, player));
             return;
         }
 
         if (event.getSlot() == PLAYER_OFFHAND_SLOT || event.getRawSlot() == CONTAINER_OFFHAND_SLOT) {
-            recordSwap(player, SwapBuffer.SwapType.WINDOW_CLICK, true);
+            recordSwap(player, SwapBuffer.SwapType.WINDOW_CLICK, likelyHasTotem(event, player));
         }
     }
 
@@ -215,19 +215,26 @@ public final class PacketSwapInjector implements Listener {
             return;
         }
 
-        if (packet instanceof ServerboundPlayerActionPacket actionPacket) {
-            if (actionPacket.getAction() == ServerboundPlayerActionPacket.Action.SWAP_ITEM_WITH_OFFHAND) {
+        String packetName = packet.getClass().getName();
+        if (packetName.endsWith("ServerboundPlayerActionPacket") || packetName.endsWith("PacketPlayInBlockDig")) {
+            Object action = invokeNoArgs(packet, "getAction");
+            if (action != null && "SWAP_ITEM_WITH_OFFHAND".equals(action.toString())) {
                 recordSwap(player, SwapBuffer.SwapType.OFFHAND_SWAP, true);
             }
             return;
         }
 
-        if (packet instanceof ServerboundContainerClickPacket clickPacket) {
-            if (clickPacket.clickType() == net.minecraft.world.inventory.ClickType.SWAP) {
+        if (packetName.endsWith("ServerboundContainerClickPacket") || packetName.endsWith("PacketPlayInWindowClick")) {
+            Object clickType = invokeNoArgs(packet, "clickType");
+            if (clickType == null) {
+                clickType = invokeNoArgs(packet, "getClickType");
+            }
+            if (clickType != null && "SWAP".equals(clickType.toString())) {
                 recordSwap(player, SwapBuffer.SwapType.NUMBER_KEY, true);
                 return;
             }
-            if (clickPacket.slotNum() == CONTAINER_OFFHAND_SLOT) {
+            Integer slotNum = getIntValue(packet, "slotNum", "getSlotNum");
+            if (slotNum != null && slotNum == CONTAINER_OFFHAND_SLOT) {
                 recordSwap(player, SwapBuffer.SwapType.WINDOW_CLICK, true);
             }
         }
@@ -303,5 +310,39 @@ public final class PacketSwapInjector implements Listener {
 
     private static boolean isTotem(ItemStack stack) {
         return stack != null && stack.getType() == Material.TOTEM_OF_UNDYING;
+    }
+
+    private static Object invokeNoArgs(Object target, String methodName) {
+        try {
+            Method method = target.getClass().getMethod(methodName);
+            method.setAccessible(true);
+            return method.invoke(target);
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
+    }
+
+    private static Integer getIntValue(Object target, String... methods) {
+        for (String methodName : methods) {
+            Object value = invokeNoArgs(target, methodName);
+            if (value instanceof Number number) {
+                return number.intValue();
+            }
+        }
+        return null;
+    }
+
+    private static boolean likelyHasTotem(InventoryClickEvent event, Player player) {
+        if (isTotem(event.getCurrentItem()) || isTotem(event.getCursor())) {
+            return true;
+        }
+        if (event.getClick() == ClickType.NUMBER_KEY) {
+            int hotbarSlot = event.getHotbarButton();
+            if (hotbarSlot >= 0 && hotbarSlot <= 8) {
+                PlayerInventory inventory = player.getInventory();
+                return isTotem(inventory.getItem(hotbarSlot));
+            }
+        }
+        return false;
     }
 }

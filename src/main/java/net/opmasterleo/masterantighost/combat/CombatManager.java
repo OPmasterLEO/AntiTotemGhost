@@ -33,6 +33,7 @@ public final class CombatManager {
 
     private final ConcurrentHashMap<UUID, CombatState> playerStates = new ConcurrentHashMap<>(64);
     private final ConcurrentHashMap<UUID, DamageCoalescer> lethalDamageBuffer = new ConcurrentHashMap<>(64);
+    private final ConcurrentHashMap<UUID, Long> pendingSinceTick = new ConcurrentHashMap<>(64);
 
     public CombatManager(Supplier<PluginConfig> configSupplier,
                          NmsAccessor nms,
@@ -64,8 +65,10 @@ public final class CombatManager {
             return;
         }
 
-        if (config.isEnableFastPath() && nms.hasTotemInEitherHand(player)) {
-            fastPathPops.increment();
+        if (nms.hasTotemInEitherHand(player)) {
+            if (config.isEnableFastPath()) {
+                fastPathPops.increment();
+            }
             return;
         }
 
@@ -76,10 +79,14 @@ public final class CombatManager {
         Object nmsDamageSource = nms.captureDamageSource(event);
         DamageContext initialContext = createContext(playerId, event, nmsDamageSource, event.getFinalDamage());
         lethalDamageBuffer.put(playerId, new DamageCoalescer(initialContext));
+        pendingSinceTick.put(playerId, initialContext.tick());
 
         long tick = initialContext.tick();
         scheduler.runOnEntityThread(player, () -> {
-            boolean hasRecent = !config.isSandboxMode() && swapBuffer.hasAnyRecentSwapActivity(playerId, tick);
+            boolean hasRecent = !config.isSandboxMode() && (
+                    swapBuffer.hasAnyRecentSwapActivity(playerId, tick)
+                            || nms.hasTotemInEitherHand(player)
+            );
             if (!hasRecent) {
                 DamageContext merged = getCurrentContext(playerId, initialContext);
                 applyTrueLethalDamage(player, merged.damage(), merged.nmsDamageSource());
@@ -104,7 +111,8 @@ public final class CombatManager {
                 return;
             }
 
-            boolean validSwap = swapBuffer.hasRecentTotemActivity(playerId, nms.getCurrentTick());
+            boolean validSwap = swapBuffer.hasRecentTotemActivity(playerId, nms.getCurrentTick())
+                    || nms.hasTotemInEitherHand(player);
             if (configSupplier.get().isSandboxMode()) {
                 validSwap = true;
             }
@@ -121,6 +129,7 @@ public final class CombatManager {
             applyTrueLethalDamage(player, context.damage(), context.nmsDamageSource());
         } finally {
             lethalDamageBuffer.remove(playerId);
+            pendingSinceTick.remove(playerId);
             CombatState state = playerStates.get(playerId);
             if (state == CombatState.PENDING_LETHAL || state == CombatState.RESURRECTED) {
                 playerStates.put(playerId, CombatState.NORMAL);
@@ -143,16 +152,26 @@ public final class CombatManager {
     public void onPlayerQuit(UUID playerId) {
         playerStates.remove(playerId);
         lethalDamageBuffer.remove(playerId);
+        pendingSinceTick.remove(playerId);
         swapBuffer.clearPlayer(playerId);
     }
 
     public void cleanupStaleEntries() {
-        // Entries are naturally removed on quit and on reconciliation completion.
+        long now = nms.getCurrentTick();
+        long maxAge = Math.max(10L, configSupplier.get().getReconciliationTicks() + 6L);
+        pendingSinceTick.forEach((playerId, pendingTick) -> {
+            if (now - pendingTick > maxAge) {
+                pendingSinceTick.remove(playerId);
+                lethalDamageBuffer.remove(playerId);
+                playerStates.put(playerId, CombatState.NORMAL);
+            }
+        });
     }
 
     public void shutdown() {
         playerStates.clear();
         lethalDamageBuffer.clear();
+        pendingSinceTick.clear();
     }
 
     private void coalesceDamage(UUID playerId, EntityDamageEvent event) {
