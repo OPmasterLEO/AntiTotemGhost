@@ -6,16 +6,16 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 
-import net.opmasterleo.masterantighost.combat.CombatManager;
+import net.opmasterleo.masterantighost.combat.CombatEngine;
 import net.opmasterleo.masterantighost.debug.DebugLogger;
 
 public final class DamageListener implements Listener {
 
     private static final String TAG = "DamageListener";
-    private final CombatManager combatManager;
+    private final CombatEngine combatEngine;
 
-    public DamageListener(CombatManager combatManager) {
-        this.combatManager = combatManager;
+    public DamageListener(CombatEngine combatEngine) {
+        this.combatEngine = combatEngine;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -24,7 +24,7 @@ public final class DamageListener implements Listener {
             return;
         }
 
-        if (combatManager.isBypassing(player.getUniqueId())) {
+        if (combatEngine.isBypassing(player.getUniqueId())) {
             return;
         }
 
@@ -38,7 +38,7 @@ public final class DamageListener implements Listener {
         }
 
         DebugLogger.debug(TAG, "Lethal damage on %s: %.2f", player.getName(), finalDamage);
-        combatManager.handleLethalDamage(player, event);
+        combatEngine.handleLethalDamage(player, event);
     }
 
 }
