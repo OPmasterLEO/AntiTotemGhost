@@ -1,4 +1,4 @@
-package net.opmasterleo.masterantighost.buffer;
+package net.opmasterleo.AntiTotemGhost.buffer;
 
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;

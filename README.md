@@ -1,4 +1,4 @@
-# MasterAntiGhost
+# AntiTotemGhost
 
 **Extreme anti-totem-ghost plugin for high-intensity crystal PvP.**
 
@@ -67,14 +67,14 @@ During PENDING_LETHAL:
 
 | Package | Purpose |
 |---------|---------|
-| `net.opmasterleo.masterantighost` | Main plugin class, lifecycle management |
-| `net.opmasterleo.masterantighost.config` | Typed configuration loader with defaults |
-| `net.opmasterleo.masterantighost.combat` | Core combat system: state machine, coalescing, resurrection |
-| `net.opmasterleo.masterantighost.nms` | NMS abstraction layer for version-independent server internals |
-| `net.opmasterleo.masterantighost.buffer` | Rolling tick-indexed swap buffer |
-| `net.opmasterleo.masterantighost.listener` | Bukkit event listeners and command handler |
-| `net.opmasterleo.masterantighost.scheduler` | Folia-safe scheduler abstraction |
-| `net.opmasterleo.masterantighost.debug` | Debug logging utility with runtime toggle |
+| `net.opmasterleo.AntiTotemGhost` | Main plugin class, lifecycle management |
+| `net.opmasterleo.AntiTotemGhost.config` | Typed configuration loader with defaults |
+| `net.opmasterleo.AntiTotemGhost.combat` | Core combat system: state machine, coalescing, resurrection |
+| `net.opmasterleo.AntiTotemGhost.nms` | NMS abstraction layer for version-independent server internals |
+| `net.opmasterleo.AntiTotemGhost.buffer` | Rolling tick-indexed swap buffer |
+| `net.opmasterleo.AntiTotemGhost.listener` | Bukkit event listeners and command handler |
+| `net.opmasterleo.AntiTotemGhost.scheduler` | Folia-safe scheduler abstraction |
+| `net.opmasterleo.AntiTotemGhost.debug` | Debug logging utility with runtime toggle |
 
 ---
 
@@ -124,7 +124,7 @@ This plugin uses **paperweight-userdev** for direct NMS access with Mojang mappi
 
 The `NmsAccessor` interface abstracts all NMS operations. Adding support for a new Minecraft version requires:
 1. Create a new implementation class (e.g., `NmsAccessorImpl_v1_21_R1`)
-2. Add a version check in `MasterAntiGhost.createNmsAccessor()`
+2. Add a version check in `AntiTotemGhost.createNmsAccessor()`
 
 ---
 
@@ -144,9 +144,9 @@ sandbox-mode: false        # Stress testing mode
 
 | Command | Permission | Description |
 |---------|-----------|-------------|
-| `/mag reload` | `masterantighost.admin` | Reload configuration |
-| `/mag debug` | `masterantighost.admin` | Toggle debug logging |
-| `/mag stats` | `masterantighost.admin` | Display statistics |
+| `/mag reload` | `AntiTotemGhost.admin` | Reload configuration |
+| `/mag debug` | `AntiTotemGhost.admin` | Toggle debug logging |
+| `/mag stats` | `AntiTotemGhost.admin` | Display statistics |
 
 ---
 
@@ -165,13 +165,13 @@ gradle wrapper --gradle-version 8.5
 ```bash
 ./gradlew build
 ```
-Output: `build/libs/MasterAntiGhost-1.0.0.jar` (reobfuscated for production)
+Output: `build/libs/AntiTotemGhost-1.0.0.jar` (reobfuscated for production)
 
 ### Build Dev JAR
 ```bash
 ./gradlew devJar
 ```
-Output: `build/libs/MasterAntiGhost-1.0.0-dev.jar` (Mojang-mapped for dev servers)
+Output: `build/libs/AntiTotemGhost-1.0.0-dev.jar` (Mojang-mapped for dev servers)
 
 ### Run Tests
 ```bash

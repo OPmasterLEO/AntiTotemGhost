@@ -5,4 +5,4 @@ pluginManagement {
     }
 }
 
-rootProject.name = "MasterAntiGhost"
+rootProject.name = "AntiTotemGhost"

@@ -1,5 +1,5 @@
-name: MasterAntiGhost
-main: net.opmasterleo.masterantighost.MasterAntiGhost
+name: AntiTotemGhost
+main: net.opmasterleo.AntiTotemGhost.AntiTotemGhost
 author: OPmasterLEO
 version: "${version}"
 api-version: "1.21"
@@ -7,13 +7,13 @@ description: "${description}"
 folia-supported: true
 
 commands:
-  masterantighost:
-    description: MasterAntiGhost admin command
-    usage: /masterantighost [reload|debug|stats|compat]
-    permission: masterantighost.admin
+  AntiTotemGhost:
+    description: AntiTotemGhost admin command
+    usage: /AntiTotemGhost [reload|debug|stats|compat]
+    permission: AntiTotemGhost.admin
     aliases: [mag, antighost]
 
 permissions:
-  masterantighost.admin:
-    description: Admin permission for MasterAntiGhost
+  AntiTotemGhost.admin:
+    description: Admin permission for AntiTotemGhost
     default: op

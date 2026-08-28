@@ -1,4 +1,4 @@
-package net.opmasterleo.masterantighost.combat;
+package net.opmasterleo.AntiTotemGhost.combat;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import net.opmasterleo.masterantighost.combat.SwapEvidenceLedger.Evidence;
+import net.opmasterleo.AntiTotemGhost.combat.SwapEvidenceLedger.Evidence;
 
 @DisplayName("SwapEvidenceLedger Tests")
 class SwapEvidenceLedgerTest {

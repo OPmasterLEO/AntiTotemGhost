@@ -1,4 +1,4 @@
-# MasterAntiGhost V8 Verification Strategy
+# AntiTotemGhost V8 Verification Strategy
 
 ## Automated unit tests
 
@@ -19,8 +19,8 @@ Coverage gap (by design):
 Preparation:
 1. Start a Paper server (Folia optional).
 2. Install the built plugin jar.
-3. Confirm plugin is healthy: `/masterantighost compat`
-4. Ensure debug logging is off unless you’re diagnosing: `/masterantighost debug`
+3. Confirm plugin is healthy: `/AntiTotemGhost compat`
+4. Ensure debug logging is off unless you’re diagnosing: `/AntiTotemGhost debug`
 
 Core anti-ghost scenarios:
 

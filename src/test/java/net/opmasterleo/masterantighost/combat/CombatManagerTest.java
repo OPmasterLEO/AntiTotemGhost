@@ -1,4 +1,4 @@
-package net.opmasterleo.masterantighost.combat;
+package net.opmasterleo.AntiTotemGhost.combat;
 
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
